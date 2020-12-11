@@ -18,12 +18,12 @@ or (linux) system that the Power*Star is plugged into:
 git clone https://github.com/sifank/PowerStar.git
 
 Binary files for the Raspberry Pi are included:
-cd PowerStar
+cd PowerStar;
 sudo make install
 
 To compile from scratch:
 cd PowerStar;
-make clean; make
+make clean; make;
 sudo make install
 
 NOTES:
