@@ -296,7 +296,8 @@ PowerStarProfile PSCTL::getProfileStatus() {
     getPosition(&actProfile.maxPosition, PS_GET_MAX);
 
     response = hidCMD(PS_GET_TMPCO, 0, 0, 3);
-    actProfile.tempCoef = response[1] + (1 / response[2]);
+    float lbyte = response[1];
+    actProfile.tempCoef = response[2] + (lbyte / 256);
     
     response = hidCMD(PS_GET_HYS, 0, 0, 2);
     actProfile.tempHysterisis = response[1] / 10;
@@ -487,7 +488,14 @@ bool PSCTL::setMultiPort(uint8_t MPtype)
     return true;
 }
 
-//******************************************************************
+//************************************************************
+uint16_t PSCTL::getUlimit(uint8_t device)
+{
+    response = hidCMD(PS_GET_ULIMIT, device, 0x00, 3); 
+    return (response[2] * 256) + response[1];
+}
+    
+//************************************************************
 // brightness: 0=off, 1-5 level
 bool PSCTL::setLED(uint8_t brightness)
 {
@@ -533,9 +541,8 @@ bool PSCTL::activateProfile(PowerStarProfile psProfile)
         return false;
     
     // Temp compensation temperature coefficient
-    // TODO need to evaluate this ...
-    uint8_t hbyte = int(psProfile.tempCoef);
-    uint8_t lbyte = int(psProfile.tempCoef / 256);
+    uint8_t hbyte = (psProfile.tempCoef);
+    uint8_t lbyte = (psProfile.tempCoef - hbyte) * 256;
     hidCMD(PS_SET_TMPCO, lbyte, hbyte, 3);
     
     // Temp compensation hysteresis

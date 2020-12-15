@@ -171,7 +171,6 @@ void askUint8(uint8_t * request, int min, int max, const std::string& Msg, bool 
 //************************************************************
 void askFloat(float * request, float min, float max, const std::string& Msg) {
     while (true) {
-        // TODO limit float print to 2 decimal places (need to check what needs precision)
         printf("Enter Value for %s (between %.1f and %.1f) [%.1f]: ", Msg.c_str(), min, max, *request);
         getline(cin, message);
         if (strlen(message.c_str()) != 0) {
@@ -278,7 +277,12 @@ void printFaults(PSCTL& psctl) {
         printf("No Faults\n");
 }
 
-
+//************************************************************
+void printUserLimits(PSCTL& psctl) {
+    
+    
+}
+    
 //************************************************************
 void printProfile(PSCTL& psctl) {
     actProfile = psctl.getProfileStatus();
@@ -377,6 +381,8 @@ void printProfile(PSCTL& psctl) {
     printf("Out4: %-10s  MP:    %-10s    Ignore Fault Mask:     <%04x>\n",
            curProfile.out4, curProfile.mp, curProfile.faultMask
           );
+    
+    printUserLimits(psctl);
 
     printf("\nCmd: Set T'emplate or E'dit profile, L'imits, Set P'ort, U'sb Names\n");
     printf("C'urrent or M'ax Position, or F'ault Mask then S'ave or Q'uit?\n");
@@ -476,7 +482,6 @@ void settingsMenu(PSCTL& psctl) {
                 
                 // Idle Current
                 // for unipolar, off/50%/maximum
-                //TODO only ask either 1-3 or off, med, high
                 if (curProfile.motorType == 0) { //unipolar
                     askUint8(&curProfile.idleMtrCurrent, 0, 254, "Unipolar Idle Current (0-84 off, 85-160: 50%, 161-254: max)", true);
                     
@@ -502,14 +507,8 @@ void settingsMenu(PSCTL& psctl) {
                 // Reverse Motor
                 askYN(&curProfile.reverseMtr, "Reverse Motor");
                 
-                
                 // Temperature Coefficient
-                /**
-                any non-zero value enables TC. The high byte is the integer part of TC and the low byte is the fractional part (fixed point 8.8 format). 
-
-                Once you have a floating point number representing steps per degree C, the integer part (which must be no more than 255) goes in byte 2 (truncate the fraction - do not round it up). You then subtract this integer from the floating point number, leaving only the fractional part. Multiply that by 256 (with rounding) and put the resulting byte value in byte 1
-                **/
-                //askFloat(&curProfile.tempCoef, 0.0, 256.256, "Temperature Coefficient (degrees C)");
+                askFloat(&curProfile.tempCoef, 0.0, 255.99, "Temperature Coefficient (degrees C or 0 to disable)");                
                 
                 // Temperature Hysteresis
                 askFloat(&curProfile.tempHysterisis, 0.0, 25.5, "Hysterisis (degrees C)");
@@ -593,16 +592,15 @@ void settingsMenu(PSCTL& psctl) {
             
             // save and activate Profile
             case 's': {
-                    if ( ! updateProfile(psctl)) {
-                        printMsg("Error: save could not updated config file");
-                        break;
-                    }
+                if ( ! updateProfile(psctl)) {
+                    printMsg("Error: save could not updated config file");
+                    break;
+                }
 
-                    if ( ! psctl.activateProfile(curProfile)) {
-                        printMsg("Problem activating profile");
-                    }
+                if ( ! psctl.activateProfile(curProfile))
+                    printMsg("Problem activating profile");
                     
-                break;
+            break;
             }
                     
             // select focus motor template **********************
@@ -705,9 +703,6 @@ void settingsMenu(PSCTL& psctl) {
                 askMask(&curProfile.faultMask, 0x4000, "MP Over Current Fault? ");
                 askMask(&curProfile.faultMask, 0x8000, "Position Change Fault? ");
                 
-                //printf("DIAG: mask is now: <%04x>", curProfile.faultMask);            
-                //printMsg(" ");
-                
                 // save fault map to system
                 if ( ! psctl.saveDewPwmFault(curProfile))
                         printMsg("Problem saving fault settings");
@@ -723,7 +718,19 @@ void settingsMenu(PSCTL& psctl) {
             
             // return to previous menu
             case 'q': {
-                // TODO add flag to ask if want to leave is not saved yet
+                bool saveProg;
+                //askYN(&pwract, " ",false);
+                askYN(&saveProg, "Save before returning?", false);
+                if (saveProg) {
+                    if ( ! updateProfile(psctl)) {
+                        printMsg("Error: save could not updated config file");
+                        break;
+                    }
+
+                    if ( ! psctl.activateProfile(curProfile))
+                        printMsg("Problem activating profile");
+                    }
+                
                 break;
             }
                         
@@ -901,7 +908,7 @@ void printStatus(PSCTL& psctl) {
     printFaults(psctl);
         
     printf("\nCmd: P'ower autoB'oot D'ew V'ariable-port M'ulti-port \n");
-    printf("     Focus: I'n O'ut G'oto A'bort 'L'ock U'nlock\n");
+    printf("     Focus: I'n O'ut G'oto A'bort L'ock U'nlock\n");
     printf("     LE'D S'ettings C'lear-faults R'estart Q'uit\n");
 }
 
@@ -996,10 +1003,9 @@ int main (int argc, char* argv[])
             
             // set auto boot
             case 'b' : {
-                
-                // TODO convert to askString
                 printf("Which device: ");
                 getline(cin, device);
+                
                 printf("On or Off? ");
                 getline(cin, action);
                 

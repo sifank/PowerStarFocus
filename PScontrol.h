@@ -107,6 +107,8 @@ class PSCTL
                    PS_GET_MTR_LED = 0xc3,
                    PS_FAULT1 = 0xD1,
                    PS_FAULT2 = 0xD3,
+                   PS_SET_ULIMIT = 0xD4,
+                   PS_GET_ULIMIT = 0xD5,
                    PS_RESET = 0xee,
                    PS_HALT  = 0xFF
                   } PS_COMMANDS;
@@ -175,6 +177,8 @@ class PSCTL
         bool     setLED(uint8_t brightness);
         bool     setMultiPort(uint8_t MPtype);
         bool     saveDewPwmFault(PowerStarProfile psProfile);
+        uint16_t setUlimit(uint8_t device, uint16_t limit);
+        uint16_t getUlimit(uint8_t device);
         
         bool     activateProfile(PowerStarProfile psProfile);
 
