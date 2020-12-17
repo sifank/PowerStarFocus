@@ -1,6 +1,6 @@
 /***************************************************************
 *  Program:      PStui.h
-*  Version:      20201208
+*  Version:      20201216
 *  Author:       Sifan S. Kahale
 *  Description:  TUI based Power*Star control
 ****************************************************************/
@@ -45,7 +45,7 @@ uint32_t    FocusSyncStep;
 uint32_t    FocusSyncMin;
 
 uint32_t    FocusRelPos;
-uint32_t    FocusRelPosMax;
+uint32_t    FocusRelPosMax; 
 uint32_t    FocusRelPosStep;
 uint32_t    FocusRelPosMin;        
 
@@ -53,6 +53,9 @@ uint8_t     FocusAbsPosState;
 uint8_t     FocusRelPosState;
 uint8_t     FocusReverseState;
 bool        isConnected;
+
+float       reqUsrLimit[12];
+float       curUsrLimit[12];
 
 string      message;
 string      device = "";

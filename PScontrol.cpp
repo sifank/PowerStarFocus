@@ -1,6 +1,6 @@
 /***************************************************************
 *  Program:      PScontrol.cpp
-*  Version:      20201208
+*  Version:      20201216
 *  Author:       Sifan S. Kahale
 *  Description:  Power*Star control drivers
 ****************************************************************/
@@ -87,7 +87,6 @@ bool PSCTL::getStatus()
 {
     // Port Status
     response = hidCMD(PS_PORT_STATUS, 0x00, 0x00, 3);
-    if (response[1] || response[2])
         
     statusMap["Out1"].state = (response[1] & 0x01);
     statusMap["USB1"].state = (response[2] & 0x01);
@@ -133,10 +132,13 @@ bool PSCTL::getStatus()
     statusMap["Out3"].current = (response[2] * 256 + response[1]) * 0.010111;
     response = hidCMD(PS_CURRENT, 3, 0x00, 3);
     statusMap["Out4"].current = (response[2] * 256 + response[1]) * 0.010111;
+    
+    //Dew
     response = hidCMD(PS_CURRENT, 4, 0x00, 3);
-    statusMap["Dew1"].current = (response[2] * 256 + response[1]) * 0.010111 * (statusMap["Dew1"].setting /10);
+    statusMap["Dew1"].current = ((response[2] * 256 + response[1]) * 0.010111) / 100  * statusMap["Dew1"].setting;
     response = hidCMD(PS_CURRENT, 5, 0x00, 3);
-    statusMap["Dew2"].current = (response[2] * 256 + response[1]) * 0.010111 * (statusMap["Dew2"].setting /10);
+    statusMap["Dew2"].current = ((response[2] * 256 + response[1]) * 0.010111) / 100 * statusMap["Dew2"].setting;
+    
     response = hidCMD(PS_CURRENT, 6, 0x00, 3);
     statusMap["Var"].current = (response[2] * 256 + response[1]) * 0.010111;
     response = hidCMD(PS_CURRENT, 7, 0x00, 3);
@@ -202,9 +204,6 @@ void PSCTL::clearFaultStatus()
         statusMap["Dew1"].fault1 = 0;
         statusMap["Dew2"].fault1 = 0;
         statusMap["MP"].fault1 = 0;
-        statusMap["IN"].fault1 = 0;
-        statusMap["IN"].fault1 = 0;
-        statusMap["FM"].fault1 = 0;
         statusMap["Out1"].fault2 = 0;
         statusMap["Out2"].fault2 = 0;
         statusMap["Out3"].fault2 = 0;
@@ -276,8 +275,43 @@ uint32_t PSCTL::getFaultStatus(uint16_t mask)
     return retval;
 }
 
-//******************************************************************
-PowerStarProfile PSCTL::getProfileStatus() {
+//***************************************************************
+void PSCTL::getUserLimitStatus(float usrlimit[12]) 
+{
+    usrlimit[0] = getUlimit(0) * .014595;
+    usrlimit[1] = getUlimit(1) * .014595;
+    usrlimit[2] = getUlimit(2) * .0128128;
+    usrlimit[3] = getUlimit(3) * .0128128;
+    usrlimit[4] = getUlimit(4) / 11.23876;
+    usrlimit[5] = getUlimit(5) / 13.21179;
+    usrlimit[6] = getUlimit(6) / 13.21179;
+    usrlimit[7] = getUlimit(7) / 98.9;
+    usrlimit[8] = getUlimit(8) / 98.9;
+    usrlimit[9] = getUlimit(9) / 98.9;
+    usrlimit[10] = getUlimit(10) / 98.9;
+    usrlimit[11] = getUlimit(11) / 98.9;
+}
+
+//***************************************************************
+void PSCTL::setUserLimitStatus(float usrlimit[12]) 
+{
+    setUlimit(0, (uint8_t)(usrlimit[0] / .014595 / 4));
+    setUlimit(1, (uint8_t)(usrlimit[1] / .014595 / 4));
+    setUlimit(2, (uint8_t)(usrlimit[2] / .0128128 / 4));
+    setUlimit(3, (uint8_t)(usrlimit[3] / .0128128 / 4));
+    setUlimit(4, (uint8_t)(usrlimit[4] * 11.23876));
+    setUlimit(5, (uint8_t)(usrlimit[5] * 13.21179));
+    setUlimit(6, (uint8_t)(usrlimit[6] * 13.21179));
+    setUlimit(7, (uint8_t)(usrlimit[7] * 98.9 / 4));
+    setUlimit(8, (uint8_t)(usrlimit[8] * 98.9 / 4));
+    setUlimit(9, (uint8_t)(usrlimit[9] * 98.9 / 4));
+    setUlimit(10, (uint8_t)(usrlimit[10] * 98.9 / 4));
+    setUlimit(11, (uint8_t)(usrlimit[11] * 98.9 / 4));
+}
+
+//***************************************************************
+PowerStarProfile PSCTL::getProfileStatus() 
+{
     PowerStarProfile actProfile;
     strncpy(actProfile.name, "Actual", sizeof(actProfile.name));
     
@@ -376,7 +410,7 @@ bool PSCTL::setPowerState(string &device, string &action)
         
 }
 
-//******************************************************************
+//**************************************************************
 bool PSCTL::setDew(uint8_t channel, uint8_t percent)
 {
     response = hidCMD(PS_DEW_CTL, channel, percent, 3);
@@ -386,7 +420,22 @@ bool PSCTL::setDew(uint8_t channel, uint8_t percent)
     return true;
 }
 
-//******************************************************************
+//**************************************************************
+bool PSCTL::setUlimit(uint8_t device, uint8_t adcLimit)
+{
+    response = hidCMD(PS_SET_ULIMIT, device, adcLimit, 3);
+
+    return true;
+}
+
+//**************************************************************
+uint16_t PSCTL::getUlimit(uint8_t device)
+{
+    response = hidCMD(PS_GET_ULIMIT, device, 0x00, 3);
+    return response[2] * 256 + response[1];
+}
+
+//**************************************************************
 bool PSCTL::setPWM(uint16_t pwmamt)
 {
     uint8_t pwmlow = pwmamt & 0x00ff;
@@ -487,15 +536,8 @@ bool PSCTL::setMultiPort(uint8_t MPtype)
     }
     return true;
 }
-
-//************************************************************
-uint16_t PSCTL::getUlimit(uint8_t device)
-{
-    response = hidCMD(PS_GET_ULIMIT, device, 0x00, 3); 
-    return (response[2] * 256) + response[1];
-}
     
-//************************************************************
+//**********************************************************
 // brightness: 0=off, 1-5 level
 bool PSCTL::setLED(uint8_t brightness)
 {
@@ -511,7 +553,7 @@ bool PSCTL::setLED(uint8_t brightness)
     return true;
 }
 
-//******************************************************************
+//***************************************************************
 bool PSCTL::activateProfile(PowerStarProfile psProfile)
 {    
     // Set Motor Type
@@ -566,7 +608,7 @@ bool PSCTL::activateProfile(PowerStarProfile psProfile)
     return true;
 }
     
-//******************************************************************
+//****************************************************************
 bool PSCTL::saveDewPwmFault(PowerStarProfile psProfile)
 {
     // save dew, pwm and fault maps to nvm
@@ -577,11 +619,11 @@ bool PSCTL::saveDewPwmFault(PowerStarProfile psProfile)
     return true;
 }
     
-//******************************************************************
+//****************************************************************
 // Maintenance procedures
-//******************************************************************
+//****************************************************************
 
-//******************************************************************
+//****************************************************************
 // Get Version
 uint16_t PSCTL::getVersion(){
     response = hidCMD(PS_VERSION, 0x00, 0x00, 1);

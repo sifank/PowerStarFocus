@@ -18,17 +18,16 @@ or (linux) system that the Power*Star is plugged into:
 git clone https://github.com/sifank/PowerStar.git
 
 Binary files for the Raspberry Pi are included:
-cd PowerStar;
+cd PowerStar
 sudo make install
 
 To compile from scratch:
 cd PowerStar;
-make clean; make;
+make clean; make
 sudo make install
 
 NOTES:
 - If it can not find it's config file, it will tell you rerun the TUI as root
 - Run pstui first to setup focus motor, power options, etc.
-- Initial configuration is set for a Unipolar motor, if you have a bipolar motor or not sure of your Unipolar, then do not connect to
-your focus motor until after to run the TUI to set it up.
+- Initial configuration is set for a Unipolar motor, if you have a bipolar motor or not sure of your Unipolar, then do not connect it to your focus motor until after to run the TUI to set it up.
 

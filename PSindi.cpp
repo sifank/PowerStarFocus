@@ -58,7 +58,7 @@ void ISSnoopDevice(XMLEle *root)
 //************************************************************
 PWRSTR::PWRSTR()
 {
-    setVersion(0, 9);
+    setVersion(0, 11);
     FI::SetCapability(FOCUSER_CAN_ABS_MOVE | FOCUSER_CAN_REL_MOVE | FOCUSER_CAN_ABORT | FOCUSER_CAN_SYNC);
     setSupportedConnections(CONNECTION_NONE);
 }

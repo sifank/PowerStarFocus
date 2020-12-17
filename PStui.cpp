@@ -1,13 +1,13 @@
 /***************************************************************
 *  Program:      pstui.cpp
-*  Version:      20201208
+*  Version:      20201216
 *  Author:       Sifan S. Kahale
 *  Description:  TUI based Power*Star control
 ****************************************************************/
 
 #include "PStui.h"
 
-float appVersion = 0.9;
+float appVersion = 0.11;
 
 char configFile[50] = "/etc/powerstar.config";
   
@@ -279,8 +279,118 @@ void printFaults(PSCTL& psctl) {
 
 //************************************************************
 void printUserLimits(PSCTL& psctl) {
+    psctl.getUserLimitStatus(curUsrLimit);
+    int rc = system("clear");
+    if(rc)
+        printMsg("Error: could not clear screen");
     
+    printf("Power*Star User Limits\n");
     
+    printf("                    Actual Request                       Actual Request\n");
+    
+    printf("Out1 current limit  %5.2f  %5.2f   12V in Low Voltage     %5.2f  %5.2f\n",
+           curUsrLimit[5], reqUsrLimit[5], 
+           curUsrLimit[0], reqUsrLimit[0]
+          );
+    printf("Out2 current limit  %5.2f  %5.2f   12V in High Voltage    %5.2f  %5.2f\n",
+           curUsrLimit[6], reqUsrLimit[6], 
+           curUsrLimit[1], reqUsrLimit[1]
+          );
+    printf("Out3 current limit  %5.2f  %5.2f   Total current limit    %5.2f  %5.2f\n",
+           curUsrLimit[7], reqUsrLimit[7], 
+           curUsrLimit[4], reqUsrLimit[4]
+          );
+    printf("Out4 current limit  %5.2f  %5.2f   VAR Low Voltage        %5.2f  %5.2f\n",
+           curUsrLimit[8], reqUsrLimit[8], 
+           curUsrLimit[2], reqUsrLimit[2]
+          );
+    printf("Dew1 current limit  %5.2f  %5.2f   VAR High Voltage       %5.2f  %5.2f\n",
+           curUsrLimit[9], reqUsrLimit[9], 
+           curUsrLimit[3], reqUsrLimit[3]
+          );
+    printf("Dew2 current limit  %5.2f  %5.2f   MP current limit       %5.2f  %5.2f\n",
+           curUsrLimit[10], reqUsrLimit[10], 
+           curUsrLimit[11], reqUsrLimit[11]
+          );
+    printf("\nActual values will be slightly different from requested\n");
+    printf("Cmd:  E'dit, then S'ave, R'eset or Q'uit?\n");
+}
+
+//************************************************************
+void userLimitsMenu(PSCTL& psctl) {
+   while (true) {
+        printUserLimits(psctl);
+        
+        printf("Command: ");
+        getline(cin, cimput);
+        boost::algorithm::to_lower(cimput);
+        char command = cimput[0];
+        switch(command) {
+            // Edit user limits
+            case 'e': {
+                askFloat(&reqUsrLimit[0], 10, 14, "IN low voltage limit");                
+                askFloat(&reqUsrLimit[1], 12, 14.5, "IN high voltage limit");
+                askFloat(&reqUsrLimit[4], 0, 22.7, "IN high current limit");
+                askFloat(&reqUsrLimit[2], 2.7, 9, "VAR low voltage limit");
+                askFloat(&reqUsrLimit[3], 3.3, 10.9, "VAR high voltage limit");
+                askFloat(&reqUsrLimit[5], 0, 15, "Out1 current limit");
+                askFloat(&reqUsrLimit[6], 0, 10, "Out2 current limit");
+                askFloat(&reqUsrLimit[7], 0, 6, "Out3 current limit");
+                askFloat(&reqUsrLimit[8], 0, 6, "Out4 current limit");
+                askFloat(&reqUsrLimit[9], 0, 5, "Dew1 current limit");
+                askFloat(&reqUsrLimit[10], 0, 5, "Dew1 current limit");
+                askFloat(&reqUsrLimit[11], 0, 6, "MP current limit");
+                break;
+            }
+            
+            // Save user limits
+            case 's': {
+                psctl.setUserLimitStatus(reqUsrLimit);
+
+                break;
+            }
+
+            // Reset user limits to defaults
+            case 'r': {
+                reqUsrLimit[0] = 14.0;
+                reqUsrLimit[1] = 14.5;
+                reqUsrLimit[2] = 9.0;
+                reqUsrLimit[3] = 10.9;
+                reqUsrLimit[4] = 22.7;
+                reqUsrLimit[5] = 15.0;
+                reqUsrLimit[6] = 10.0;
+                reqUsrLimit[7] = reqUsrLimit[8] = reqUsrLimit[11] = 6.0;
+                reqUsrLimit[9] = reqUsrLimit[10] = 5.0;
+                
+                psctl.setUserLimitStatus(reqUsrLimit);
+                break;
+            }
+            
+            // return to previous menu
+            case 'q': {
+                bool saveProg = false;
+                askYN(&saveProg, "Save before returning?");
+                if (saveProg) {
+                    if ( ! updateProfile(psctl)) {
+                        printMsg("Error: save could not updated config file");
+                        break;
+                    }
+
+                    if ( ! psctl.activateProfile(curProfile))
+                        printMsg("Problem activating profile");
+                    }
+                
+                break;
+            }
+                        
+            default: {
+            }
+                        
+        }
+        if (command == 'q')
+            break;
+                
+    }
 }
     
 //************************************************************
@@ -381,11 +491,9 @@ void printProfile(PSCTL& psctl) {
     printf("Out4: %-10s  MP:    %-10s    Ignore Fault Mask:     <%04x>\n",
            curProfile.out4, curProfile.mp, curProfile.faultMask
           );
-    
-    printUserLimits(psctl);
 
     printf("\nCmd: Set T'emplate or E'dit profile, L'imits, Set P'ort, U'sb Names\n");
-    printf("C'urrent or M'ax Position, or F'ault Mask then S'ave or Q'uit?\n");
+    printf("C'urrent or M'ax Position, R'eset or F'ault Mask then S'ave or Q'uit?\n");
 }
    
 //************************************************************
@@ -711,16 +819,22 @@ void settingsMenu(PSCTL& psctl) {
             
             // set user defined limits
             case 'l': {
-                // TODO set user defined limits
-                printMsg("Not implemented yet");
+                userLimitsMenu(psctl);
+                break;
+            }
+            
+            //TODO
+            // Reset all limits to defaults
+            case 'r': {
+                printMsg("Reset not implemented yet");
                 break;
             }
             
             // return to previous menu
             case 'q': {
-                bool saveProg;
+                bool saveProg = false;
                 //askYN(&pwract, " ",false);
-                askYN(&saveProg, "Save before returning?", false);
+                askYN(&saveProg, "Save before returning?");
                 if (saveProg) {
                     if ( ! updateProfile(psctl)) {
                         printMsg("Error: save could not updated config file");
@@ -756,7 +870,7 @@ void printStatus(PSCTL& psctl) {
     printf("Power*Star Status\n");
     printf("Device           State Current  Auto   F1     F2       USB      State   Auto\n");
     
-    printf("%-17s %3s   %4.1f    %3s %5s  %5s       %-10s\n",
+    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s\n",
            curProfile.out1,
            psctl.statusMap["Out1"].state ? "on" : "off",
            psctl.statusMap["Out1"].current,
@@ -768,7 +882,7 @@ void printStatus(PSCTL& psctl) {
            //psctl.statusMap["USB1"].state ? "on" : "off",
            //psctl.statusMap["USB1"].autoboot ? "on" : "off");
     
-    printf("%-17s %3s   %4.1f    %3s %5s  %5s       %-10s%3s    %3s\n",
+    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s%3s    %3s\n",
            curProfile.out2,
            psctl.statusMap["Out2"].state ? "on" : "off",
            psctl.statusMap["Out2"].current,
@@ -779,7 +893,7 @@ void printStatus(PSCTL& psctl) {
            psctl.statusMap["USB2"].state ? "on" : "off",
            psctl.statusMap["USB2"].autoboot ? "on" : "off");
     
-    printf("%-17s %3s   %4.1f    %3s %5s  %5s       %-10s%3s    %3s\n",
+    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s%3s    %3s\n",
            curProfile.out3,
            psctl.statusMap["Out3"].state ? "on" : "off",
            psctl.statusMap["Out3"].current,
@@ -790,7 +904,7 @@ void printStatus(PSCTL& psctl) {
            psctl.statusMap["USB3"].state ? "on" : "off",
            psctl.statusMap["USB3"].autoboot ? "on" : "off");
     
-    printf("%-17s %3s   %4.1f    %3s %5s  %5s       %-10s\n",
+    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s\n",
            curProfile.out4,
            psctl.statusMap["Out4"].state ? "on" : "off",
            psctl.statusMap["Out4"].current,
@@ -804,7 +918,7 @@ void printStatus(PSCTL& psctl) {
     
     int dewSetting = psctl.statusMap["Dew1"].setting;
     string dewPercent = dewSetting ? to_string(psctl.statusMap["Dew1"].setting) : "off";
-    printf("%-17s %3s   %4.1f    %3s %5s  %5s       %-10s\n",
+    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s\n",
            curProfile.dew1,
            dewPercent.c_str(),
            psctl.statusMap["Dew1"].current,
@@ -819,7 +933,7 @@ void printStatus(PSCTL& psctl) {
         
     dewSetting = psctl.statusMap["Dew2"].setting;
     dewPercent = dewSetting ? to_string(psctl.statusMap["Dew2"].setting) : "off";
-    printf("%-17s %3s   %4.1f    %3s %5s  %5s       %-10s%3s    %3s\n",
+    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s%3s    %3s\n",
            curProfile.dew2,
            dewPercent.c_str(),
            psctl.statusMap["Dew2"].current,
@@ -834,7 +948,7 @@ void printStatus(PSCTL& psctl) {
     char varField[17];
     snprintf(varField, 17, "%s (%.1f)", curProfile.var, varSetting);
     
-    printf("%-17s %3s   %4.1f    %3s %5s  %5s\n",
+    printf("%-17s %3s   %5.2f    %3s %5s  %5s\n",
            varField,
            psctl.statusMap["Var"].state ? "on" : "off",
            psctl.statusMap["Var"].current,
@@ -862,7 +976,7 @@ void printStatus(PSCTL& psctl) {
     }
     char mpField[17];
     snprintf(mpField, 17, "%s (%s)", curProfile.mp, mpSetting.c_str());
-    printf("%-16s  %3s   %4.1f    %3s %5s  %5s\n",
+    printf("%-16s  %3s   %5.2f    %3s %5s  %5s\n",
            mpField,
            mpPercent.c_str(),
            psctl.statusMap["MP"].current,
@@ -872,7 +986,7 @@ void printStatus(PSCTL& psctl) {
 
     float Dp = psctl.statusMap["Temp"].levels - ((100 - psctl.statusMap["Hum"].levels)/5.0);
     float DpDep = psctl.statusMap["Temp"].levels - Dp;
-    printf("\nTemp:     %3.1fF  Hum:    %2.1f%%    DewPoint   %2.1f   DP Dep    %2.1f\n",
+    printf("\nTemp:     %4.1fF  Hum:    %4.1f%%    DewPoint   %4.1f   DP Dep    %4.1f\n",
            psctl.statusMap["Temp"].levels,
            psctl.statusMap["Hum"].levels,
            Dp,
@@ -880,7 +994,7 @@ void printStatus(PSCTL& psctl) {
     );
     
     float pswatts = psctl.statusMap["IN"].levels * psctl.statusMap["IN"].current;
-    printf("Volts-in: %2.1fV  Amps-in: %2.2fA    Watts    %4.1fW  Amp-Hrs: %6.1fAH Pwr\n",
+    printf("Volts-in: %5.2fV  Amps-in: %5.2fA    Watts    %5.2fW  Amp-Hrs: %6.1fAH Pwr\n",
            psctl.statusMap["IN"].levels,
            psctl.statusMap["IN"].current,
            pswatts,
@@ -955,6 +1069,9 @@ int main (int argc, char* argv[])
     
     // unlock focus motor
     psctl.unLockFocusMtr();
+    
+    // set requested user limits initially to current limits on P*S
+    psctl.getUserLimitStatus(reqUsrLimit);
 
     while (true) {    
         printStatus(psctl);        

@@ -1,6 +1,6 @@
 /********************************************************
 *  Program:      PScontrol.h
-*  Version:      20201208
+*  Version:      20201216
 *  Author:       Sifan S. Kahale
 *  Description:  Power*Star control .h file
 *********************************************************/
@@ -177,8 +177,6 @@ class PSCTL
         bool     setLED(uint8_t brightness);
         bool     setMultiPort(uint8_t MPtype);
         bool     saveDewPwmFault(PowerStarProfile psProfile);
-        uint16_t setUlimit(uint8_t device, uint16_t limit);
-        uint16_t getUlimit(uint8_t device);
         
         bool     activateProfile(PowerStarProfile psProfile);
 
@@ -189,6 +187,10 @@ class PSCTL
         uint16_t getVersion();
         float    getHumidity();
         float    getTemperature();
+        uint16_t getUlimit(uint8_t device);
+        bool     setUlimit(uint8_t device, uint8_t adcLimit);
+        void     getUserLimitStatus(float usrlimit[12]);
+        void     setUserLimitStatus(float usrlimit[12]);
         
         // Set/Get Absolute Position
         bool setAbsPosition(uint32_t ticks);
