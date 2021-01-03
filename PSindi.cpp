@@ -1,43 +1,38 @@
- /****************************************************************
-Program:    PSindi.cpp
-Author:     Sifan Kahale
-Version:    20201210
-Desc:       INDI interface for PowerStar
-Requires:   PScontrol.cpp device interface
-****************************************************************/
+/***********************************************************
+*  Program:      PSindi.cpp
+*  Version:      20201218
+*  Author:       Sifan S. Kahale
+*  Description:  Power^Star indi .h file
+***********************************************************/
+
 #include "PSindi.h"
+//#include "indicom.h"
 
-#define FOCUS_SETTINGS_TAB "Settings"
+// We declare an auto pointer to PegasusUPB.
+static std::unique_ptr<PegasusUPB> upb(new PegasusUPB());
 
-static std::unique_ptr<PWRSTR> pwrhb(new PWRSTR());
-
-//************************************************************
-void ISGetProperties(const char *dev)
+void ISGetProperties(const char * dev)
 {
-    pwrhb->ISGetProperties(dev);
+    upb->ISGetProperties(dev);
 }
 
-//************************************************************
-void ISNewSwitch(const char *dev, const char *name, ISState *states, char *names[], int n)
+void ISNewSwitch(const char * dev, const char * name, ISState * states, char * names[], int n)
 {
-    pwrhb->ISNewSwitch(dev, name, states, names, n);
+    upb->ISNewSwitch(dev, name, states, names, n);
 }
 
-//************************************************************
-void ISNewText(const char *dev, const char *name, char *texts[], char *names[], int n)
+void ISNewText(const char * dev, const char * name, char * texts[], char * names[], int n)
 {
-    pwrhb->ISNewText(dev, name, texts, names, n);
+    upb->ISNewText(dev, name, texts, names, n);
 }
 
-//************************************************************
-void ISNewNumber(const char *dev, const char *name, double values[], char *names[], int n)
+void ISNewNumber(const char * dev, const char * name, double values[], char * names[], int n)
 {
-    pwrhb->ISNewNumber(dev, name, values, names, n);
+    upb->ISNewNumber(dev, name, values, names, n);
 }
 
-//************************************************************
-void ISNewBLOB(const char *dev, const char *name, int sizes[], int blobsizes[], char *blobs[], char *formats[],
-               char *names[], int n)
+void ISNewBLOB(const char * dev, const char * name, int sizes[], int blobsizes[], char * blobs[], char * formats[],
+               char * names[], int n)
 {
     INDI_UNUSED(dev);
     INDI_UNUSED(name);
@@ -49,29 +44,235 @@ void ISNewBLOB(const char *dev, const char *name, int sizes[], int blobsizes[], 
     INDI_UNUSED(n);
 }
 
-//************************************************************
-void ISSnoopDevice(XMLEle *root)
+void ISSnoopDevice(XMLEle * root)
 {
-    pwrhb->ISSnoopDevice(root);
+    upb->ISSnoopDevice(root);
 }
 
-//************************************************************
-PWRSTR::PWRSTR()
+PegasusUPB::PegasusUPB() : FI(this), WI(this)
 {
-    setVersion(0, 11);
-    FI::SetCapability(FOCUSER_CAN_ABS_MOVE | FOCUSER_CAN_REL_MOVE | FOCUSER_CAN_ABORT | FOCUSER_CAN_SYNC);
-    setSupportedConnections(CONNECTION_NONE);
+    setVersion(1, 3);
+
+    lastSensorData.reserve(21);
+    lastPowerData.reserve(4);
+    lastStepperData.reserve(4);
 }
 
-//************************************************************
-bool PWRSTR::Connect()
+bool PegasusUPB::initProperties()
 {
-    PSCTL psctl;
-    if (isSimulation())
-    {
-        SetTimer(POLLMS);
-        return true;
-    }
+    INDI::DefaultDevice::initProperties();
+
+    setDriverInterface(AUX_INTERFACE | FOCUSER_INTERFACE | WEATHER_INTERFACE);
+
+    FI::SetCapability(FOCUSER_CAN_ABS_MOVE |
+                      FOCUSER_CAN_REL_MOVE |
+                      FOCUSER_CAN_REVERSE  |
+                      FOCUSER_CAN_SYNC     |
+                      FOCUSER_CAN_ABORT    |
+                      FOCUSER_HAS_BACKLASH);
+
+    FI::initProperties(FOCUS_TAB);
+    WI::initProperties(ENVIRONMENT_TAB, ENVIRONMENT_TAB);
+
+    addAuxControls();
+
+    ////////////////////////////////////////////////////////////////////////////
+    /// Main Control Panel
+    ////////////////////////////////////////////////////////////////////////////
+    // Cycle all power on/off
+    IUFillSwitch(&PowerCycleAllS[POWER_CYCLE_ON], "POWER_CYCLE_ON", "All On", ISS_OFF);
+    IUFillSwitch(&PowerCycleAllS[POWER_CYCLE_OFF], "POWER_CYCLE_OFF", "All Off", ISS_OFF);
+    IUFillSwitchVector(&PowerCycleAllSP, PowerCycleAllS, 2, getDeviceName(), "POWER_CYCLE", "Cycle Power", MAIN_CONTROL_TAB,
+                       IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+    // Reboot
+    IUFillSwitch(&RebootS[0], "REBOOT", "Reboot Device", ISS_OFF);
+    IUFillSwitchVector(&RebootSP, RebootS, 1, getDeviceName(), "REBOOT_DEVICE", "Device", MAIN_CONTROL_TAB, IP_RW, ISR_ATMOST1,
+                       60, IPS_IDLE);
+
+    // Power Sensors
+    IUFillNumber(&PowerSensorsN[SENSOR_VOLTAGE], "SENSOR_VOLTAGE", "Voltage (V)", "%4.2f", 0, 999, 100, 0);
+    IUFillNumber(&PowerSensorsN[SENSOR_CURRENT], "SENSOR_CURRENT", "Current (A)", "%4.2f", 0, 999, 100, 0);
+    IUFillNumber(&PowerSensorsN[SENSOR_POWER], "SENSOR_POWER", "Power (W)", "%4.2f", 0, 999, 100, 0);
+    IUFillNumberVector(&PowerSensorsNP, PowerSensorsN, 3, getDeviceName(), "POWER_SENSORS", "Sensors", MAIN_CONTROL_TAB, IP_RO,
+                       60, IPS_IDLE);
+
+    // Overall Power Consumption
+    IUFillNumber(&PowerConsumptionN[CONSUMPTION_AVG_AMPS], "CONSUMPTION_AVG_AMPS", "Avg. Amps", "%4.2f", 0, 999, 100, 0);
+    IUFillNumber(&PowerConsumptionN[CONSUMPTION_AMP_HOURS], "CONSUMPTION_AMP_HOURS", "Amp Hours", "%4.2f", 0, 999, 100, 0);
+    IUFillNumber(&PowerConsumptionN[CONSUMPTION_WATT_HOURS], "CONSUMPTION_WATT_HOURS", "Watt Hours", "%4.2f", 0, 999, 100, 0);
+    IUFillNumberVector(&PowerConsumptionNP, PowerConsumptionN, 3, getDeviceName(), "POWER_CONSUMPTION", "Consumption",
+                       MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+
+    ////////////////////////////////////////////////////////////////////////////
+    /// Power Group
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Power Labels
+    IUFillText(&PowerControlsLabelsT[0], "POWER_LABEL_1", "Port 1", "Port 1");
+    IUFillText(&PowerControlsLabelsT[1], "POWER_LABEL_2", "Port 2", "Port 2");
+    IUFillText(&PowerControlsLabelsT[2], "POWER_LABEL_3", "Port 3", "Port 3");
+    IUFillText(&PowerControlsLabelsT[3], "POWER_LABEL_4", "Port 4", "Port 4");
+    IUFillTextVector(&PowerControlsLabelsTP, PowerControlsLabelsT, 4, getDeviceName(), "POWER_CONTROL_LABEL", "Power Labels",
+                     POWER_TAB, IP_WO, 60, IPS_IDLE);
+
+    char portLabel[MAXINDILABEL];
+
+    // Turn on/off power and power boot up
+    memset(portLabel, 0, MAXINDILABEL);
+    int portRC = IUGetConfigText(getDeviceName(), PowerControlsLabelsTP.name, PowerControlsLabelsT[0].name, portLabel,
+                                 MAXINDILABEL);
+    IUFillSwitch(&PowerControlS[0], "POWER_CONTROL_1", portRC == -1 ? "Port 1" : portLabel, ISS_OFF);
+
+    memset(portLabel, 0, MAXINDILABEL);
+    portRC = IUGetConfigText(getDeviceName(), PowerControlsLabelsTP.name, PowerControlsLabelsT[1].name, portLabel,
+                             MAXINDILABEL);
+    IUFillSwitch(&PowerControlS[1], "POWER_CONTROL_2", portRC == -1 ? "Port 2" : portLabel, ISS_OFF);
+
+    memset(portLabel, 0, MAXINDILABEL);
+    portRC = IUGetConfigText(getDeviceName(), PowerControlsLabelsTP.name, PowerControlsLabelsT[2].name, portLabel,
+                             MAXINDILABEL);
+    IUFillSwitch(&PowerControlS[2], "POWER_CONTROL_3", portRC == -1 ? "Port 3" : portLabel, ISS_OFF);
+
+    memset(portLabel, 0, MAXINDILABEL);
+    portRC = IUGetConfigText(getDeviceName(), PowerControlsLabelsTP.name, PowerControlsLabelsT[3].name, portLabel,
+                             MAXINDILABEL);
+    IUFillSwitch(&PowerControlS[3], "POWER_CONTROL_4", portRC == -1 ? "Port 4" : portLabel, ISS_OFF);
+
+    IUFillSwitchVector(&PowerControlSP, PowerControlS, 4, getDeviceName(), "POWER_CONTROL", "Power Control", POWER_TAB, IP_RW,
+                       ISR_NOFMANY, 60, IPS_IDLE);
+
+    // Current Draw
+    IUFillNumber(&PowerCurrentN[0], "POWER_CURRENT_1", "#1 (A)", "%4.2f", 0, 1000, 0, 0);
+    IUFillNumber(&PowerCurrentN[1], "POWER_CURRENT_2", "#2 (A)", "%4.2f", 0, 1000, 0, 0);
+    IUFillNumber(&PowerCurrentN[2], "POWER_CURRENT_3", "#3 (A)", "%4.2f", 0, 1000, 0, 0);
+    IUFillNumber(&PowerCurrentN[3], "POWER_CURRENT_4", "#4 (A)", "%4.2f", 0, 1000, 0, 0);
+    IUFillNumberVector(&PowerCurrentNP, PowerCurrentN, 4, getDeviceName(), "POWER_CURRENT", "Current Draw", POWER_TAB, IP_RO,
+                       60, IPS_IDLE);
+
+    // Power on Boot
+    IUFillSwitch(&PowerOnBootS[0], "POWER_PORT_1", PowerControlS[0].label, ISS_ON);
+    IUFillSwitch(&PowerOnBootS[1], "POWER_PORT_2", PowerControlS[1].label, ISS_ON);
+    IUFillSwitch(&PowerOnBootS[2], "POWER_PORT_3", PowerControlS[2].label, ISS_ON);
+    IUFillSwitch(&PowerOnBootS[3], "POWER_PORT_4", PowerControlS[3].label, ISS_ON);
+    IUFillSwitchVector(&PowerOnBootSP, PowerOnBootS, 4, getDeviceName(), "POWER_ON_BOOT", "Power On Boot", POWER_TAB, IP_RW,
+                       ISR_NOFMANY, 60, IPS_IDLE);
+
+    // Over Current
+    IUFillLight(&OverCurrentL[0], "POWER_PORT_1", PowerControlS[0].label, IPS_OK);
+    IUFillLight(&OverCurrentL[1], "POWER_PORT_2", PowerControlS[1].label, IPS_OK);
+    IUFillLight(&OverCurrentL[2], "POWER_PORT_3", PowerControlS[2].label, IPS_OK);
+    IUFillLight(&OverCurrentL[3], "POWER_PORT_4", PowerControlS[3].label, IPS_OK);
+    IUFillLight(&OverCurrentL[4], "DEW_A", "Dew A", IPS_OK);
+    IUFillLight(&OverCurrentL[5], "DEW_B", "Dew B", IPS_OK);
+    IUFillLight(&OverCurrentL[6], "DEW_C", "Dew C", IPS_OK);
+    IUFillLightVector(&OverCurrentLP, OverCurrentL, 7, getDeviceName(), "POWER_OVER_CURRENT", "Over Current", POWER_TAB,
+                      IPS_IDLE);
+
+    // Power LED
+    IUFillSwitch(&PowerLEDS[POWER_LED_ON], "POWER_LED_ON", "On", ISS_ON);
+    IUFillSwitch(&PowerLEDS[POWER_LED_OFF], "POWER_LED_OFF", "Off", ISS_OFF);
+    IUFillSwitchVector(&PowerLEDSP, PowerLEDS, 2, getDeviceName(), "POWER_LED", "LED", POWER_TAB, IP_RW, ISR_1OFMANY, 60,
+                       IPS_IDLE);
+
+    IUFillNumber(&AdjustableOutputN[0], "ADJUSTABLE_VOLTAGE_VALUE", "Voltage (V)", "%.f", 3, 12, 1, 12);
+    IUFillNumberVector(&AdjustableOutputNP, AdjustableOutputN, 1, getDeviceName(), "ADJUSTABLE_VOLTAGE", "Adj. Output",
+                       POWER_TAB, IP_RW, 60, IPS_IDLE);
+
+
+    ////////////////////////////////////////////////////////////////////////////
+    /// Dew Group
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Automatic Dew v1
+    IUFillSwitch(&AutoDewS[INDI_ENABLED], "INDI_ENABLED", "Enabled", ISS_OFF);
+    IUFillSwitch(&AutoDewS[INDI_DISABLED], "INDI_DISABLED", "Disabled", ISS_ON);
+    IUFillSwitchVector(&AutoDewSP, AutoDewS, 2, getDeviceName(), "AUTO_DEW", "Auto Dew", DEW_TAB, IP_RW, ISR_1OFMANY, 60,
+                       IPS_IDLE);
+
+    // Automatic Dew v2
+    IUFillSwitch(&AutoDewV2S[DEW_PWM_A], "DEW_A", "Dew A", ISS_OFF);
+    IUFillSwitch(&AutoDewV2S[DEW_PWM_B], "DEW_B", "Dew B", ISS_OFF);
+    IUFillSwitch(&AutoDewV2S[DEW_PWM_C], "DEW_C", "Dew C", ISS_OFF);
+    IUFillSwitchVector(&AutoDewV2SP, AutoDewV2S, 3, getDeviceName(), "AUTO_DEW", "Auto Dew", DEW_TAB, IP_RW, ISR_NOFMANY, 60,
+                       IPS_IDLE);
+
+    // Dew PWM
+    IUFillNumber(&DewPWMN[DEW_PWM_A], "DEW_A", "Dew A (%)", "%.2f", 0, 100, 10, 0);
+    IUFillNumber(&DewPWMN[DEW_PWM_B], "DEW_B", "Dew B (%)", "%.2f", 0, 100, 10, 0);
+    IUFillNumber(&DewPWMN[DEW_PWM_C], "DEW_C", "Dew C (%)", "%.2f", 0, 100, 10, 0);
+    IUFillNumberVector(&DewPWMNP, DewPWMN, 3, getDeviceName(), "DEW_PWM", "Dew PWM", DEW_TAB, IP_RW, 60, IPS_IDLE);
+
+    // Dew current draw
+    IUFillNumber(&DewCurrentDrawN[DEW_PWM_A], "DEW_CURRENT_A", "Dew A (A)", "%4.2f", 0, 1000, 10, 0);
+    IUFillNumber(&DewCurrentDrawN[DEW_PWM_B], "DEW_CURRENT_B", "Dew B (A)", "%4.2f", 0, 1000, 10, 0);
+    IUFillNumber(&DewCurrentDrawN[DEW_PWM_C], "DEW_CURRENT_C", "Dew C (A)", "%4.2f", 0, 1000, 10, 0);
+    IUFillNumberVector(&DewCurrentDrawNP, DewCurrentDrawN, 3, getDeviceName(), "DEW_CURRENT", "Dew Current", DEW_TAB, IP_RO, 60,
+                       IPS_IDLE);
+
+    ////////////////////////////////////////////////////////////////////////////
+    /// USB Group
+    ////////////////////////////////////////////////////////////////////////////
+
+    // USB Hub control v1
+    IUFillSwitch(&USBControlS[INDI_ENABLED], "INDI_ENABLED", "Enabled", ISS_ON);
+    IUFillSwitch(&USBControlS[INDI_DISABLED], "INDI_DISABLED", "Disabled", ISS_OFF);
+    IUFillSwitchVector(&USBControlSP, USBControlS, 2, getDeviceName(), "USB_HUB_CONTROL", "Hub", USB_TAB, IP_RW, ISR_1OFMANY,
+                       60, IPS_IDLE);
+
+    // USB Hub control v2
+    IUFillSwitch(&USBControlV2S[0], "PORT_1", "USB3 Port1", ISS_ON);
+    IUFillSwitch(&USBControlV2S[1], "PORT_2", "USB3 Port2", ISS_ON);
+    IUFillSwitch(&USBControlV2S[2], "PORT_3", "USB3 Port3", ISS_ON);
+    IUFillSwitch(&USBControlV2S[3], "PORT_4", "USB3 Port4", ISS_ON);
+    IUFillSwitch(&USBControlV2S[4], "PORT_5", "USB2 Port5", ISS_ON);
+    IUFillSwitch(&USBControlV2S[5], "PORT_6", "USB2 Port6", ISS_ON);
+    IUFillSwitchVector(&USBControlV2SP, USBControlV2S, 6, getDeviceName(), "USB_PORT_CONTROL", "Ports", USB_TAB, IP_RW,
+                       ISR_NOFMANY, 60, IPS_IDLE);
+
+    // USB Hub Status
+    IUFillLight(&USBStatusL[0], "PORT_1", "Port #1", IPS_OK);
+    IUFillLight(&USBStatusL[1], "PORT_2", "Port #2", IPS_OK);
+    IUFillLight(&USBStatusL[2], "PORT_3", "Port #3", IPS_OK);
+    IUFillLight(&USBStatusL[3], "PORT_4", "Port #4", IPS_OK);
+    IUFillLight(&USBStatusL[4], "PORT_5", "Port #5", IPS_OK);
+    IUFillLight(&USBStatusL[5], "PORT_6", "Port #6", IPS_OK);
+    IUFillLightVector(&USBStatusLP, USBStatusL, 6, getDeviceName(), "USB_PORT_STATUS", "Status", USB_TAB, IPS_IDLE);
+
+    ////////////////////////////////////////////////////////////////////////////
+    /// Focuser Group
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Settings
+    //    IUFillNumber(&FocusBacklashN[0], "SETTING_BACKLASH", "Backlash (steps)", "%.f", 0, 999, 100, 0);
+    IUFillNumber(&FocuserSettingsN[SETTING_MAX_SPEED], "SETTING_MAX_SPEED", "Max Speed (%)", "%.f", 0, 900, 100, 400);
+    IUFillNumberVector(&FocuserSettingsNP, FocuserSettingsN, 1, getDeviceName(), "FOCUSER_SETTINGS", "Settings", FOCUS_TAB,
+                       IP_RW, 60, IPS_IDLE);
+
+    // Backlash
+    //    IUFillSwitch(&FocusBacklashS[INDI_ENABLED], "INDI_ENABLED", "Enabled", ISS_OFF);
+    //    IUFillSwitch(&FocusBacklashS[INDI_DISABLED], "INDI_DISABLED", "Disabled", ISS_ON);
+    //    IUFillSwitchVector(&FocusBacklashSP, FocusBacklashS, 2, getDeviceName(), "FOCUSER_BACKLASH", "Backlash", FOCUS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    // Temperature
+    IUFillNumber(&FocuserTemperatureN[0], "FOCUSER_TEMPERATURE_VALUE", "Value (C)", "%4.2f", -50, 85, 1, 0);
+    IUFillNumberVector(&FocuserTemperatureNP, FocuserTemperatureN, 1, getDeviceName(), "FOCUSER_TEMPERATURE", "Temperature",
+                       FOCUS_TAB, IP_RO, 60, IPS_IDLE);
+
+    ////////////////////////////////////////////////////////////////////////////
+    /// Firmware Group
+    ////////////////////////////////////////////////////////////////////////////
+    IUFillText(&FirmwareT[FIRMWARE_VERSION], "VERSION", "Version", "NA");
+    IUFillText(&FirmwareT[FIRMWARE_UPTIME], "UPTIME", "Uptime (h)", "NA");
+    IUFillTextVector(&FirmwateTP, FirmwareT, 2, getDeviceName(), "FIRMWARE_INFO", "Firmware", FIRMWARE_TAB, IP_RO, 60,
+                     IPS_IDLE);
+    ////////////////////////////////////////////////////////////////////////////
+    /// Environment Group
+    ////////////////////////////////////////////////////////////////////////////
+    addParameter("WEATHER_TEMPERATURE", "Temperature (C)", -15, 35, 15);
+    addParameter("WEATHER_HUMIDITY", "Humidity %", 0, 100, 15);
+    addParameter("WEATHER_DEWPOINT", "Dew Point (C)", 0, 100, 15);
+    setCriticalParameter("WEATHER_TEMPERATURE");
 
     if ( ! psctl.Connect() )  //this does the unlock as well
     {
@@ -124,101 +325,504 @@ bool PWRSTR::Connect()
     return true;
 }
 
-//************************************************************
-bool PWRSTR::Disconnect()
+bool PegasusUPB::updateProperties()
 {
-    if (isSimulation() == false)
-    {        
-        LOGF_INFO("Humidity @ closing: %#.1f", psctl.getHumidity());
-        LOGF_INFO("Temperature @ closing: %#.1f", psctl.getTemperature());
-        
-        psctl.Disconnect();
-    }
+    INDI::DefaultDevice::updateProperties();
 
-    return true;
-}
-
-//************************************************************
-const char *PWRSTR::getDefaultName()
-{
-    return "Power^Star";
-}
-
-//************************************************************
-bool PWRSTR::initProperties()
-{
-    INDI::Focuser::initProperties();
-
-    addSimulationControl();
-    
-    addDebugControl();
-    
-    return true;
-}
-
-//************************************************************
-void PWRSTR::TimerHit()
-{
-    if (!isConnected())
-        return;
-    
-    uint32_t faultstat = psctl.getFaultStatus(curProfile.faultMask);      
-        
-    if (faultstat) {
-        LOGF_ERROR("System Fault: %08x Occurred", faultstat);
-        return;
-    }
-
-    uint32_t currentTicks = 0;
-    
-    bool rc = psctl.getAbsPosition(&currentTicks);
-
-    if (rc) {
-        FocusAbsPosN[0].value = currentTicks;
-    }
-
-    m_Motor = static_cast<PS_MOTOR>(psctl.getFocusStatus());
-
-    if (FocusAbsPosNP.s == IPS_BUSY || FocusRelPosNP.s == IPS_BUSY)
+    if (isConnected())
     {
-        if (isSimulation())
-        {
-            if (FocusAbsPosN[0].value < targetPosition)
-                simPosition += 500;
-            else
-                simPosition -= 500;
+        // Setup Parameters
+        setupParams();
 
-            if (std::abs(simPosition - static_cast<int32_t>(targetPosition)) < 500)
+        // Main Control
+        defineSwitch(&PowerCycleAllSP);
+        defineNumber(&PowerSensorsNP);
+        defineNumber(&PowerConsumptionNP);
+        defineSwitch(&RebootSP);
+
+        // Power
+        defineSwitch(&PowerControlSP);
+        defineText(&PowerControlsLabelsTP);
+        defineNumber(&PowerCurrentNP);
+        defineSwitch(&PowerOnBootSP);
+        OverCurrentLP.nlp = (version == UPB_V1) ? 4 : 7;
+        defineLight(&OverCurrentLP);
+        defineSwitch(&PowerLEDSP);
+        if (version == UPB_V2)
+            defineNumber(&AdjustableOutputNP);
+
+        // Dew
+        if (version == UPB_V1)
+            defineSwitch(&AutoDewSP);
+        else
+            defineSwitch(&AutoDewV2SP);
+        DewPWMNP.nnp = (version == UPB_V1) ? 2 : 3;
+        defineNumber(&DewPWMNP);
+
+        DewCurrentDrawNP.nnp = (version == UPB_V1) ? 2 : 3;
+        defineNumber(&DewCurrentDrawNP);
+
+        // USB
+        defineSwitch(&USBControlSP);
+        if (version == UPB_V2)
+            defineSwitch(&USBControlV2SP);
+        if (version == UPB_V1)
+            defineLight(&USBStatusLP);
+
+        // Focuser
+        FI::updateProperties();
+        defineNumber(&FocuserSettingsNP);
+        //defineSwitch(&FocusBacklashSP);
+        defineNumber(&FocuserTemperatureNP);
+
+        WI::updateProperties();
+
+        // Firmware
+        defineText(&FirmwateTP);
+
+        setupComplete = true;
+    }
+    else
+    {
+        // Main Control
+        deleteProperty(PowerCycleAllSP.name);
+        deleteProperty(PowerSensorsNP.name);
+        deleteProperty(PowerConsumptionNP.name);
+        deleteProperty(RebootSP.name);
+
+        // Power
+        deleteProperty(PowerControlSP.name);
+        deleteProperty(PowerControlsLabelsTP.name);
+        deleteProperty(PowerCurrentNP.name);
+        deleteProperty(PowerOnBootSP.name);
+        deleteProperty(OverCurrentLP.name);
+        deleteProperty(PowerLEDSP.name);
+        if (version == UPB_V2)
+            deleteProperty(AdjustableOutputNP.name);
+
+        // Dew
+        if (version == UPB_V1)
+            deleteProperty(AutoDewSP.name);
+        else
+            deleteProperty(AutoDewV2SP.name);
+        deleteProperty(DewPWMNP.name);
+        deleteProperty(DewCurrentDrawNP.name);
+
+        // USB
+        deleteProperty(USBControlSP.name);
+        if (version == UPB_V2)
+            deleteProperty(USBControlV2SP.name);
+        if (version == UPB_V1)
+            deleteProperty(USBStatusLP.name);
+
+        // Focuser
+        FI::updateProperties();
+        deleteProperty(FocuserSettingsNP.name);
+        deleteProperty(FocuserTemperatureNP.name);
+
+        WI::updateProperties();
+
+        deleteProperty(FirmwateTP.name);
+
+        setupComplete = false;
+    }
+
+    return true;
+}
+
+const char * PegasusUPB::getDefaultName()
+{
+    return "Power*Star";
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::ISNewSwitch(const char * dev, const char * name, ISState * states, char * names[], int n)
+{
+    if (dev && !strcmp(dev, getDeviceName()))
+    {
+        // Cycle all power on or off
+        if (!strcmp(name, PowerCycleAllSP.name))
+        {
+            IUUpdateSwitch(&PowerCycleAllSP, states, names, n);
+
+            PowerCycleAllSP.s = IPS_ALERT;
+            char cmd[PEGASUS_LEN] = {0}, res[PEGASUS_LEN] = {0};
+            snprintf(cmd, PEGASUS_LEN, "PZ:%d", IUFindOnSwitchIndex(&PowerCycleAllSP));
+            if (sendCommand(cmd, res))
             {
-                FocusAbsPosN[0].value = targetPosition;
-                simPosition = FocusAbsPosN[0].value;
-                m_Motor = PS_NOT_MOVING;
+                PowerCycleAllSP.s = !strcmp(cmd, res) ? IPS_OK : IPS_ALERT;
             }
 
-            FocusAbsPosN[0].value = simPosition;
+            IUResetSwitch(&PowerCycleAllSP);
+            IDSetSwitch(&PowerCycleAllSP, nullptr);
+            return true;
         }
 
-        if (m_Motor == PS_NOT_MOVING && targetPosition == FocusAbsPosN[0].value)
+        // Reboot
+        if (!strcmp(name, RebootSP.name))
         {
-            if (FocusRelPosNP.s == IPS_BUSY)
+            RebootSP.s = reboot() ? IPS_OK : IPS_ALERT;
+            IDSetSwitch(&RebootSP, nullptr);
+            LOG_INFO("Rebooting device...");
+            return true;
+        }
+
+        // Control Power per port
+        if (!strcmp(name, PowerControlSP.name))
+        {
+            bool failed = false;
+            for (int i = 0; i < n; i++)
             {
-                FocusRelPosNP.s = IPS_OK;
-                IDSetNumber(&FocusRelPosNP, nullptr);
+                if (!strcmp(names[i], PowerControlS[i].name) && states[i] != PowerControlS[i].s)
+                {
+                    if (setPowerEnabled(i + 1, states[i] == ISS_ON) == false)
+                    {
+                        failed = true;
+                        break;
+                    }
+                }
             }
 
-            FocusAbsPosNP.s = IPS_OK;
-            LOGF_INFO("Focuser now at %d", targetPosition);
-            LOG_DEBUG("Focuser reached target position.");
+            if (failed)
+                PowerControlSP.s = IPS_ALERT;
+            else
+            {
+                PowerControlSP.s = IPS_OK;
+                IUUpdateSwitch(&PowerControlSP, states, names, n);
+            }
+
+            IDSetSwitch(&PowerControlSP, nullptr);
+            return true;
+        }
+
+        // Power on boot
+        if (!strcmp(name, PowerOnBootSP.name))
+        {
+            IUUpdateSwitch(&PowerOnBootSP, states, names, n);
+            PowerOnBootSP.s = setPowerOnBoot() ? IPS_OK : IPS_ALERT;
+            IDSetSwitch(&PowerOnBootSP, nullptr);
+            saveConfig(true, PowerOnBootSP.name);
+            return true;
+        }
+
+        // Auto Dew v1
+        if (!strcmp(name, AutoDewSP.name))
+        {
+            int prevIndex = IUFindOnSwitchIndex(&AutoDewSP);
+            IUUpdateSwitch(&AutoDewSP, states, names, n);
+            if (setAutoDewEnabled(AutoDewS[INDI_ENABLED].s == ISS_ON))
+            {
+                AutoDewSP.s = IPS_OK;
+            }
+            else
+            {
+                IUResetSwitch(&AutoDewSP);
+                AutoDewS[prevIndex].s = ISS_ON;
+                AutoDewSP.s = IPS_ALERT;
+            }
+
+            IDSetSwitch(&AutoDewSP, nullptr);
+            return true;
+        }
+
+        // Auto Dew v2
+        if (!strcmp(name, AutoDewV2SP.name))
+        {
+            ISState Dew1 = AutoDewV2S[DEW_PWM_A].s;
+            ISState Dew2 = AutoDewV2S[DEW_PWM_B].s;
+            ISState Dew3 = AutoDewV2S[DEW_PWM_C].s;
+            IUUpdateSwitch(&AutoDewV2SP, states, names, n);
+            if (toggleAutoDewV2())
+            {
+                AutoDewSP.s = IPS_OK;
+            }
+            else
+            {
+                IUResetSwitch(&AutoDewV2SP);
+                AutoDewV2S[DEW_PWM_A].s = Dew1;
+                AutoDewV2S[DEW_PWM_B].s = Dew2;
+                AutoDewV2S[DEW_PWM_C].s = Dew3;
+                AutoDewV2SP.s = IPS_ALERT;
+            }
+
+            IDSetSwitch(&AutoDewV2SP, nullptr);
+            return true;
+        }
+
+        // USB Hub Control v1
+        if (!strcmp(name, USBControlSP.name))
+        {
+            int prevIndex = IUFindOnSwitchIndex(&USBControlSP);
+            IUUpdateSwitch(&USBControlSP, states, names, n);
+            if (setUSBHubEnabled(USBControlS[0].s == ISS_ON))
+            {
+                USBControlSP.s = IPS_OK;
+            }
+            else
+            {
+                IUResetSwitch(&USBControlSP);
+                USBControlS[prevIndex].s = ISS_ON;
+                USBControlSP.s = IPS_ALERT;
+            }
+
+            IDSetSwitch(&USBControlSP, nullptr);
+            return true;
+        }
+
+        // USB Hub Control v2
+        if (!strcmp(name, USBControlV2SP.name))
+        {
+            bool rc[6] = {true};
+            ISState ports[6] = {ISS_ON};
+
+            for (int i = 0; i < USBControlV2SP.nsp; i++)
+                ports[i] = USBControlV2S[i].s;
+
+            IUUpdateSwitch(&USBControlV2SP, states, names, n);
+            for (int i = 0; i < USBControlV2SP.nsp; i++)
+            {
+                if (ports[i] != USBControlV2S[i].s)
+                    rc[i] = setUSBPortEnabled(i, USBControlV2S[i].s == ISS_ON);
+            }
+
+            // All is OK
+            if (rc[0] && rc[1] && rc[2] && rc[3] && rc[4] && rc[5])
+            {
+                USBControlSP.s = IPS_OK;
+            }
+            else
+            {
+                IUResetSwitch(&USBControlV2SP);
+                for (int i = 0; i < USBControlV2SP.nsp; i++)
+                    USBControlV2S[i].s = ports[i];
+                USBControlV2SP.s = IPS_ALERT;
+            }
+
+            IDSetSwitch(&USBControlSP, nullptr);
+            return true;
+        }
+
+        // Focuser backlash
+        //        if (!strcmp(name, FocusBacklashSP.name))
+        //        {
+        //            int prevIndex = IUFindOnSwitchIndex(&FocusBacklashSP);
+        //            IUUpdateSwitch(&FocusBacklashSP, states, names, n);
+        //            if (setFocuserBacklashEnabled(FocusBacklashS[0].s == ISS_ON))
+        //            {
+        //                FocusBacklashSP.s = IPS_OK;
+        //            }
+        //            else
+        //            {
+        //                IUResetSwitch(&FocusBacklashSP);
+        //                FocusBacklashS[prevIndex].s = ISS_ON;
+        //                FocusBacklashSP.s = IPS_ALERT;
+        //            }
+
+        //            IDSetSwitch(&FocusBacklashSP, nullptr);
+        //            return true;
+        //        }
+
+        // Power LED
+        if (!strcmp(name, PowerLEDSP.name))
+        {
+            int prevIndex = IUFindOnSwitchIndex(&PowerLEDSP);
+            IUUpdateSwitch(&PowerLEDSP, states, names, n);
+            if (setPowerLEDEnabled(PowerLEDS[0].s == ISS_ON))
+            {
+                PowerLEDSP.s = IPS_OK;
+            }
+            else
+            {
+                IUResetSwitch(&PowerLEDSP);
+                PowerLEDS[prevIndex].s = ISS_ON;
+                PowerLEDSP.s = IPS_ALERT;
+            }
+
+            IDSetSwitch(&PowerLEDSP, nullptr);
+            return true;
+        }
+
+        if (strstr(name, "FOCUS"))
+            return FI::processSwitch(dev, name, states, names, n);
+    }
+
+    return DefaultDevice::ISNewSwitch(dev, name, states, names, n);
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::ISNewNumber(const char * dev, const char * name, double values[], char * names[], int n)
+{
+    if (dev && !strcmp(dev, getDeviceName()))
+    {
+        // Adjustable output
+        if (!strcmp(name, AdjustableOutputNP.name))
+        {
+            if (setAdjustableOutput(static_cast<uint8_t>(values[0])))
+            {
+                IUUpdateNumber(&AdjustableOutputNP, values, names, n);
+                AdjustableOutputNP.s = IPS_OK;
+            }
+            else
+                AdjustableOutputNP.s = IPS_ALERT;
+
+            IDSetNumber(&AdjustableOutputNP, nullptr);
+            return true;
+        }
+
+        // Dew PWM
+        if (!strcmp(name, DewPWMNP.name))
+        {
+            bool rc1 = false, rc2 = false, rc3 = false;
+            for (int i = 0; i < n; i++)
+            {
+                if (!strcmp(names[i], DewPWMN[DEW_PWM_A].name))
+                    rc1 = setDewPWM(5, static_cast<uint8_t>(values[i] / 100.0 * 255.0));
+                else if (!strcmp(names[i], DewPWMN[DEW_PWM_B].name))
+                    rc2 = setDewPWM(6, static_cast<uint8_t>(values[i] / 100.0 * 255.0));
+                else if (!strcmp(names[i], DewPWMN[DEW_PWM_C].name))
+                    rc2 = setDewPWM(7, static_cast<uint8_t>(values[i] / 100.0 * 255.0));
+            }
+
+            DewPWMNP.s = (rc1 && rc2 && rc3) ? IPS_OK : IPS_ALERT;
+            if (DewPWMNP.s == IPS_OK)
+                IUUpdateNumber(&DewPWMNP, values, names, n);
+            IDSetNumber(&DewPWMNP, nullptr);
+            return true;
+        }
+
+        // Focuser Settings
+        if (!strcmp(name, FocuserSettingsNP.name))
+        {
+            if (setFocuserMaxSpeed(values[0]))
+            {
+                FocuserSettingsN[0].value = values[0];
+                FocuserSettingsNP.s = IPS_OK;
+            }
+            else
+            {
+                FocuserSettingsNP.s = IPS_ALERT;
+            }
+
+            IDSetNumber(&FocuserSettingsNP, nullptr);
+            return true;
+        }
+
+        if (strstr(name, "FOCUS_"))
+            return FI::processNumber(dev, name, values, names, n);
+
+        if (strstr(name, "WEATHER_"))
+            return WI::processNumber(dev, name, values, names, n);
+    }
+    return INDI::DefaultDevice::ISNewNumber(dev, name, values, names, n);
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::ISNewText(const char * dev, const char * name, char * texts[], char * names[], int n)
+{
+    if (dev && !strcmp(dev, getDeviceName()))
+    {
+        // Power Labels
+        if (!strcmp(name, PowerControlsLabelsTP.name))
+        {
+            IUUpdateText(&PowerControlsLabelsTP, texts, names, n);
+            PowerControlsLabelsTP.s = IPS_OK;
+            LOG_INFO("Power port labels saved. Driver must be restarted for the labels to take effect.");
+            saveConfig();
+            IDSetText(&PowerControlsLabelsTP, nullptr);
+            return true;
         }
     }
 
-    IDSetNumber(&FocusAbsPosNP, nullptr);
-
-    SetTimer(POLLMS);
+    return INDI::DefaultDevice::ISNewText(dev, name, texts, names, n);
 }
 
-//************************************************************
-IPState PWRSTR::MoveAbsFocuser(uint32_t targetTicks)
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::sendCommand(const char * cmd, char * res)
+{
+    int nbytes_read = 0, nbytes_written = 0, tty_rc = 0;
+    LOGF_DEBUG("CMD <%s>", cmd);
+
+    if (isSimulation())
+    {
+        if (!strcmp(cmd, "PS"))
+        {
+            strncpy(res, "PS:1111:12", PEGASUS_LEN);
+        }
+        else if (!strcmp(cmd, "PA"))
+        {
+            strncpy(res, "UPB2:12.0:0.9:10:24.8:37:9.1:1111:111111:153:153:0:0:0:0:0:70:0:0:0000000:0", PEGASUS_LEN);
+        }
+        else if (!strcmp(cmd, "PC"))
+        {
+            strncpy(res, "0.40:0.00:0.03:26969", PEGASUS_LEN);
+        }
+        else if (!strcmp(cmd, "SA"))
+        {
+            strncpy(res, "3000:0:0:10", PEGASUS_LEN);
+        }
+        else if (!strcmp(cmd, "SS"))
+        {
+            strncpy(res, "999", PEGASUS_LEN);
+        }
+        else if (!strcmp(cmd, "PV"))
+        {
+            strncpy(res, "Sim v1.0", PEGASUS_LEN);
+        }
+        else if (res)
+        {
+            strncpy(res, cmd, PEGASUS_LEN);
+        }
+
+        return true;
+    }
+
+    for (int i = 0; i < 2; i++)
+    {
+        char command[PEGASUS_LEN] = {0};
+        tcflush(PortFD, TCIOFLUSH);
+        snprintf(command, PEGASUS_LEN, "%s\n", cmd);
+        if ( (tty_rc = tty_write_string(PortFD, command, &nbytes_written)) != TTY_OK)
+            continue;
+
+        if (!res)
+        {
+            tcflush(PortFD, TCIOFLUSH);
+            return true;
+        }
+
+        if ( (tty_rc = tty_nread_section(PortFD, res, PEGASUS_LEN, stopChar, PEGASUS_TIMEOUT, &nbytes_read)) != TTY_OK
+                || nbytes_read == 1)
+            continue;
+
+        tcflush(PortFD, TCIOFLUSH);
+
+        cleanupResponse(res);
+        LOGF_DEBUG("RES <%s>", res);
+        return true;
+    }
+
+    if (tty_rc != TTY_OK)
+    {
+        char errorMessage[MAXRBUF];
+        tty_error_msg(tty_rc, errorMessage, MAXRBUF);
+        LOGF_ERROR("Serial error: %s", errorMessage);
+    }
+
+    return false;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+IPState PegasusUPB::MoveAbsFocuser(uint32_t targetTicks)
 {
     if ( ! psctl.MoveAbsFocuser(targetTicks))
         return IPS_ALERT;
@@ -229,30 +833,37 @@ IPState PWRSTR::MoveAbsFocuser(uint32_t targetTicks)
     return IPS_BUSY;
 }
 
-//************************************************************
-IPState PWRSTR::MoveRelFocuser(FocusDirection dir, uint32_t ticks)
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+IPState PegasusUPB::MoveRelFocuser(FocusDirection dir, uint32_t ticks)
 {
-    int direction = (dir == FOCUS_INWARD) ? -1 : 1;
-    int reversed = (FocusReverseS[INDI_ENABLED].s == ISS_ON) ? -1 : 1;
-    int relative = static_cast<int>(ticks);
-
-    int targetAbsPosition = FocusAbsPosN[0].value + (relative * direction * reversed);
-
-    targetAbsPosition = std::min(static_cast<uint32_t>(FocusMaxPosN[0].value),static_cast<uint32_t>(std::max(static_cast<int>(FocusAbsPosN[0].min), targetAbsPosition)));
-
-    return (IPState)psctl.MoveAbsFocuser(targetAbsPosition);
+    return MoveAbsFocuser(dir == FOCUS_INWARD ? FocusAbsPosN[0].value - ticks : FocusAbsPosN[0].value + ticks);
 }
 
-//************************************************************
-bool PWRSTR::AbortFocuser()
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::AbortFocuser()
 {
-    LOG_INFO("Aborting");
+    OG_INFO("Aborting");
     
     return psctl.AbortFocuser();
 }
 
-//************************************************************
-bool PWRSTR::SyncFocuser(uint32_t ticks)
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::ReverseFocuser(bool enabled)
+{
+    //TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::SyncFocuser(uint32_t ticks)
 {
     if ( ! psctl.setAbsPosition(ticks))
         return false;
@@ -263,9 +874,576 @@ bool PWRSTR::SyncFocuser(uint32_t ticks)
     return psctl.SyncFocuser(ticks);
 }
 
-//************************************************************
-bool PWRSTR::SetFocuserMaxPosition(uint32_t ticks)
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::SetFocuserBacklash(int32_t steps)
 {
-    return psctl.SetFocuserMaxPosition(ticks);
+    //TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setFocuserMaxSpeed(uint16_t maxSpeed)
+{
+    //TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::SetFocuserBacklashEnabled(bool enabled)
+{
+    // TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setPowerEnabled(uint8_t port, bool enabled)
+{
+    // TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setPowerLEDEnabled(bool enabled)
+{
+    // TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setAutoDewEnabled(bool enabled)
+{
+    // TODO 
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setAdjustableOutput(uint8_t voltage)
+{
+    // TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setPowerOnBoot()
+{
+    // TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::getPowerOnBoot()
+{
+    // TODO
+    return true;
+}
+
+
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setDewPWM(uint8_t id, uint8_t value)
+{
+    // TODO
+    return true;
+}
+
+
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setUSBHubEnabled(bool enabled)
+{
+    // TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setUSBPortEnabled(uint8_t port, bool enabled)
+{
+    // TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::toggleAutoDewV2()
+{
+    // TODO
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::saveConfigItems(FILE * fp)
+{
+    // Save CCD Config
+    INDI::DefaultDevice::saveConfigItems(fp);
+    FI::saveConfigItems(fp);
+
+    IUSaveConfigSwitch(fp, &PowerLEDSP);
+    IUSaveConfigSwitch(fp, &AutoDewSP);
+    IUSaveConfigNumber(fp, &FocuserSettingsNP);
+    IUSaveConfigText(fp, &PowerControlsLabelsTP);
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+void PegasusUPB::TimerHit()
+{
+    if (!isConnected() || setupComplete == false)
+    {
+        SetTimer(POLLMS);
+        return;
+    }
+
+    if (getSensorData())
+    {
+        getPowerData();
+        getStepperData();
+    }
+
+    SetTimer(POLLMS);
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::sendFirmware()
+{
+    // TODO
+    /**
+    char res[PEGASUS_LEN] = {0};
+    if (sendCommand("PV", res))
+    {
+        LOGF_INFO("Detected firmware %s", res);
+        IUSaveText(&FirmwareT[FIRMWARE_VERSION], res);
+        IDSetText(&FirmwateTP, nullptr);
+        return true;
+    }
+
+    return false;
+    **/
+    return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::sensorUpdated(const std::vector<std::string> &result, uint8_t start, uint8_t end)
+{
+    for (uint8_t index = start; index <= end; index++)
+        if (result[index] != lastSensorData[index])
+            return true;
+
+    return false;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::getSensorData()
+{
+    char res[PEGASUS_LEN] = {0};
+    if (sendCommand("PA", res))
+    {
+        std::vector<std::string> result = split(res, ":");
+        if ( (version == UPB_V1 && result.size() != 19) ||
+                (version == UPB_V2 && result.size() != 21))
+        {
+            LOG_WARN("Received wrong number of detailed sensor data. Retrying...");
+            return false;
+        }
+
+        if (result == lastSensorData)
+            return true;
+
+        // Power Sensors
+        PowerSensorsN[SENSOR_VOLTAGE].value = std::stod(result[1]);
+        PowerSensorsN[SENSOR_CURRENT].value = std::stod(result[2]);
+        PowerSensorsN[SENSOR_POWER].value = std::stod(result[3]);
+        PowerSensorsNP.s = IPS_OK;
+        //if (lastSensorData[0] != result[0] || lastSensorData[1] != result[1] || lastSensorData[2] != result[2])
+        if (sensorUpdated(result, 0, 2))
+            IDSetNumber(&PowerSensorsNP, nullptr);
+
+        // Environment Sensors
+        setParameterValue("WEATHER_TEMPERATURE", std::stod(result[4]));
+        setParameterValue("WEATHER_HUMIDITY", std::stod(result[5]));
+        setParameterValue("WEATHER_DEWPOINT", std::stod(result[6]));
+        //if (lastSensorData[4] != result[4] || lastSensorData[5] != result[5] || lastSensorData[6] != result[6])
+        if (sensorUpdated(result, 4, 6))
+        {
+            if (WI::syncCriticalParameters())
+                IDSetLight(&critialParametersLP, nullptr);
+            ParametersNP.s = IPS_OK;
+            IDSetNumber(&ParametersNP, nullptr);
+        }
+
+        // Port Status
+        const char * portStatus = result[7].c_str();
+        PowerControlS[0].s = (portStatus[0] == '1') ? ISS_ON : ISS_OFF;
+        PowerControlS[1].s = (portStatus[1] == '1') ? ISS_ON : ISS_OFF;
+        PowerControlS[2].s = (portStatus[2] == '1') ? ISS_ON : ISS_OFF;
+        PowerControlS[3].s = (portStatus[3] == '1') ? ISS_ON : ISS_OFF;
+        //if (lastSensorData[7] != result[7])
+        if (sensorUpdated(result, 7, 7))
+            IDSetSwitch(&PowerControlSP, nullptr);
+
+        // Hub Status
+        const char * usb_status = result[8].c_str();
+        if (version == UPB_V1)
+        {
+            USBControlS[0].s = (usb_status[0] == '0') ? ISS_ON : ISS_OFF;
+            USBControlS[1].s = (usb_status[0] == '0') ? ISS_OFF : ISS_ON;
+            USBStatusL[0].s = (USBControlS[0].s == ISS_ON) ? IPS_OK : IPS_IDLE;
+            USBStatusL[1].s = (USBControlS[0].s == ISS_ON) ? IPS_OK : IPS_IDLE;
+            USBStatusL[2].s = (USBControlS[0].s == ISS_ON) ? IPS_OK : IPS_IDLE;
+            USBStatusL[3].s = (USBControlS[0].s == ISS_ON) ? IPS_OK : IPS_IDLE;
+            USBStatusL[4].s = (USBControlS[0].s == ISS_ON) ? IPS_OK : IPS_IDLE;
+            //if (lastSensorData[8] != result[8])
+            if (sensorUpdated(result, 8, 8))
+            {
+                USBControlSP.s = (IUFindOnSwitchIndex(&USBControlSP) == 0) ? IPS_OK : IPS_IDLE;
+                IDSetSwitch(&USBControlSP, nullptr);
+                IDSetLight(&USBStatusLP, nullptr);
+            }
+        }
+        else
+        {
+            USBControlV2S[0].s = (usb_status[0] == '1') ? ISS_ON : ISS_OFF;
+            USBControlV2S[1].s = (usb_status[1] == '1') ? ISS_ON : ISS_OFF;
+            USBControlV2S[2].s = (usb_status[2] == '1') ? ISS_ON : ISS_OFF;
+            USBControlV2S[3].s = (usb_status[3] == '1') ? ISS_ON : ISS_OFF;
+            USBControlV2S[4].s = (usb_status[4] == '1') ? ISS_ON : ISS_OFF;
+            USBControlV2S[5].s = (usb_status[5] == '1') ? ISS_ON : ISS_OFF;
+            USBControlV2SP.s = IPS_OK;
+            //if (lastSensorData[8] != result[8])
+            if (sensorUpdated(result, 8, 8))
+            {
+                IDSetSwitch(&USBControlV2SP, nullptr);
+            }
+        }
+
+        // From here, we get differences between v1 and v2 readings
+        int index = 9;
+        // Dew PWM
+        DewPWMN[DEW_PWM_A].value = std::stod(result[index]) / 255.0 * 100.0;
+        DewPWMN[DEW_PWM_B].value = std::stod(result[index + 1]) / 255.0 * 100.0;
+        if (version == UPB_V2)
+            DewPWMN[DEW_PWM_C].value = std::stod(result[index + 2]) / 255.0 * 100.0;
+        //        if (lastSensorData[index] != result[index] ||
+        //                lastSensorData[index + 1] != result[index + 1] ||
+        //                (version == UPB_V2 && lastSensorData[index +2] != result[index + 2]))
+        if (sensorUpdated(result, index, version == UPB_V1 ? index + 1 : index + 2))
+            IDSetNumber(&DewPWMNP, nullptr);
+
+        index = (version == UPB_V1) ? 11 : 12;
+
+        const double ampDivision = (version == UPB_V1) ? 400.0 : 300.0;
+
+        // Current draw
+        PowerCurrentN[0].value = std::stod(result[index]) / ampDivision;
+        PowerCurrentN[1].value = std::stod(result[index + 1]) / ampDivision;
+        PowerCurrentN[2].value = std::stod(result[index + 2]) / ampDivision;
+        PowerCurrentN[3].value = std::stod(result[index + 3]) / ampDivision;
+        //        if (lastSensorData[index] != result[index] ||
+        //                lastSensorData[index + 1] != result[index + 1] ||
+        //                lastSensorData[index + 2] != result[index + 2] ||
+        //                lastSensorData[index + 3] != result[index + 3])
+        if (sensorUpdated(result, index, index + 3))
+            IDSetNumber(&PowerCurrentNP, nullptr);
+
+        index = (version == UPB_V1) ? 15 : 16;
+
+        DewCurrentDrawN[DEW_PWM_A].value = std::stod(result[index]) / ampDivision;
+        DewCurrentDrawN[DEW_PWM_B].value = std::stod(result[index + 1]) / ampDivision;
+        if (version == UPB_V2)
+            DewCurrentDrawN[DEW_PWM_C].value = std::stod(result[index + 2]) / (ampDivision * 2);
+        //        if (lastSensorData[index] != result[index] ||
+        //                lastSensorData[index + 1] != result[index + 1] ||
+        //                (version == UPB_V2 && lastSensorData[index + 2] != result[index + 2]))
+        if (sensorUpdated(result, index, version == UPB_V1 ? index + 1 : index + 2))
+            IDSetNumber(&DewCurrentDrawNP, nullptr);
+
+        index = (version == UPB_V1) ? 17 : 19;
+
+        // Over Current
+        //if (lastSensorData[index] != result[index])
+        if (sensorUpdated(result, index, index))
+        {
+            const char * over_curent = result[index].c_str();
+            OverCurrentL[0].s = (over_curent[0] == '0') ? IPS_OK : IPS_ALERT;
+            OverCurrentL[1].s = (over_curent[1] == '0') ? IPS_OK : IPS_ALERT;
+            OverCurrentL[2].s = (over_curent[2] == '0') ? IPS_OK : IPS_ALERT;
+            OverCurrentL[3].s = (over_curent[3] == '0') ? IPS_OK : IPS_ALERT;
+            if (version == UPB_V2)
+            {
+                OverCurrentL[4].s = (over_curent[4] == '0') ? IPS_OK : IPS_ALERT;
+                OverCurrentL[5].s = (over_curent[5] == '0') ? IPS_OK : IPS_ALERT;
+                OverCurrentL[6].s = (over_curent[6] == '0') ? IPS_OK : IPS_ALERT;
+            }
+
+            IDSetLight(&OverCurrentLP, nullptr);
+        }
+
+        index = (version == UPB_V1) ? 18 : 20;
+
+        // Auto Dew
+        if (version == UPB_V1)
+        {
+            //if (lastSensorData[index] != result[index])
+            if (sensorUpdated(result, index, index))
+            {
+                AutoDewS[INDI_ENABLED].s  = (std::stoi(result[index]) == 1) ? ISS_ON : ISS_OFF;
+                AutoDewS[INDI_DISABLED].s = (std::stoi(result[index]) == 1) ? ISS_OFF : ISS_ON;
+                IDSetSwitch(&AutoDewSP, nullptr);
+            }
+        }
+        else
+        {
+            //if (lastSensorData[index] != result[index])
+            if (sensorUpdated(result, index, index))
+            {
+                int value = std::stoi(result[index]);
+                IUResetSwitch(&AutoDewV2SP);
+                switch (value)
+                {
+                    case 1:
+                        AutoDewV2S[DEW_PWM_A].s = AutoDewV2S[DEW_PWM_B].s = AutoDewV2S[DEW_PWM_C].s = ISS_ON;
+                        break;
+
+                    case 2:
+                        AutoDewV2S[DEW_PWM_A].s = ISS_ON;
+                        break;
+
+                    case 3:
+                        AutoDewV2S[DEW_PWM_B].s = ISS_ON;
+                        break;
+
+                    case 4:
+                        AutoDewV2S[DEW_PWM_C].s = ISS_ON;
+                        break;
+
+                    case 5:
+                        AutoDewV2S[DEW_PWM_A].s = ISS_ON;
+                        AutoDewV2S[DEW_PWM_B].s = ISS_ON;
+                        break;
+
+                    case 6:
+                        AutoDewV2S[DEW_PWM_A].s = ISS_ON;
+                        AutoDewV2S[DEW_PWM_C].s = ISS_ON;
+                        break;
+
+                    case 7:
+                        AutoDewV2S[DEW_PWM_B].s = ISS_ON;
+                        AutoDewV2S[DEW_PWM_C].s = ISS_ON;
+                        break;
+                    default:
+                        break;
+                }
+                IDSetSwitch(&AutoDewV2SP, nullptr);
+            }
+        }
+
+        lastSensorData = result;
+        return true;
+    }
+
+    return false;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::getPowerData()
+{
+    char res[PEGASUS_LEN] = {0};
+    if (sendCommand("PC", res))
+    {
+        std::vector<std::string> result = split(res, ":");
+        if ( (version == UPB_V1 && result.size() != 3) ||
+                (version == UPB_V2 && result.size() != 4))
+        {
+            LOG_WARN("Received wrong number of power sensor data. Retrying...");
+            return false;
+        }
+
+        if (result == lastPowerData)
+            return true;
+
+        PowerConsumptionN[CONSUMPTION_AVG_AMPS].value = std::stod(result[0]);
+        PowerConsumptionN[CONSUMPTION_AMP_HOURS].value = std::stod(result[1]);
+        PowerConsumptionN[CONSUMPTION_WATT_HOURS].value = std::stod(result[2]);
+        PowerConsumptionNP.s = IPS_OK;
+        IDSetNumber(&PowerConsumptionNP, nullptr);
+
+        if (version == UPB_V2)
+        {
+            std::chrono::milliseconds uptime(std::stol(result[3]));
+            using dhours = std::chrono::duration<double, std::ratio<3600>>;
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(3) << dhours(uptime).count();
+            IUSaveText(&FirmwareT[FIRMWARE_UPTIME], ss.str().c_str());
+            IDSetText(&FirmwateTP, nullptr);
+        }
+
+        lastPowerData = result;
+        return true;
+    }
+
+    return false;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::getStepperData()
+{
+    char res[PEGASUS_LEN] = {0};
+    if (sendCommand("SA", res))
+    {
+        std::vector<std::string> result = split(res, ":");
+        if (result.size() != 4)
+        {
+            LOG_WARN("Received wrong number of stepper sensor data. Retrying...");
+            return false;
+        }
+
+        if (result == lastStepperData)
+            return true;
+
+        FocusAbsPosN[0].value = std::stoi(result[0]);
+        focusMotorRunning = (std::stoi(result[1]) == 1);
+
+        if (FocusAbsPosNP.s == IPS_BUSY && focusMotorRunning == false)
+        {
+            FocusAbsPosNP.s = FocusRelPosNP.s = IPS_OK;
+            IDSetNumber(&FocusAbsPosNP, nullptr);
+            IDSetNumber(&FocusRelPosNP, nullptr);
+        }
+        else if (result[0] != lastStepperData[0])
+            IDSetNumber(&FocusAbsPosNP, nullptr);
+
+        FocusReverseS[INDI_ENABLED].s = (std::stoi(result[2]) == 1) ? ISS_ON : ISS_OFF;
+        FocusReverseS[INDI_DISABLED].s = (std::stoi(result[2]) == 1) ? ISS_OFF : ISS_ON;
+
+        if (result[2] != lastStepperData[2])
+            IDSetSwitch(&FocusReverseSP, nullptr);
+
+        uint16_t backlash = std::stoi(result[3]);
+        if (backlash == 0)
+        {
+            FocusBacklashN[0].value = backlash;
+            FocusBacklashS[INDI_ENABLED].s = ISS_OFF;
+            FocusBacklashS[INDI_DISABLED].s = ISS_ON;
+            if (result[3] != lastStepperData[3])
+            {
+                IDSetSwitch(&FocusBacklashSP, nullptr);
+                IDSetNumber(&FocuserSettingsNP, nullptr);
+            }
+        }
+        else
+        {
+            FocusBacklashS[INDI_ENABLED].s = ISS_ON;
+            FocusBacklashS[INDI_DISABLED].s = ISS_OFF;
+            FocusBacklashN[0].value = backlash;
+            if (result[3] != lastStepperData[3])
+            {
+                IDSetSwitch(&FocusBacklashSP, nullptr);
+                IDSetNumber(&FocuserSettingsNP, nullptr);
+            }
+        }
+
+        lastStepperData = result;
+        return true;
+    }
+
+    return false;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::reboot()
+{
+    return sendCommand("PF", nullptr);
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+std::vector<std::string> PegasusUPB::split(const std::string &input, const std::string &regex)
+{
+    // passing -1 as the submatch index parameter performs splitting
+    std::regex re(regex);
+    std::sregex_token_iterator
+    first{input.begin(), input.end(), re, -1},
+          last;
+    return {first, last};
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+bool PegasusUPB::setupParams()
+{
+    if (version == UPB_V2)
+        getPowerOnBoot();
+
+    sendFirmware();
+
+    // Get Max Focuser Speed
+    char res[PEGASUS_LEN] = {0};
+    if (sendCommand("SS", res))
+    {
+        uint32_t value = std::stol(res);
+        if (value == UINT16_MAX)
+        {
+            LOGF_WARN("Invalid maximum speed detected: %u. Please set maximum speed appropiate for your motor focus type (0-900)",
+                      value);
+            FocuserSettingsNP.s = IPS_ALERT;
+        }
+        else
+        {
+            FocuserSettingsN[SETTING_MAX_SPEED].value = value;
+            FocuserSettingsNP.s = IPS_OK;
+        }
+    }
+
+    return false;
+}
+
+//////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////
+void PegasusUPB::cleanupResponse(char *response)
+{
+    std::string s(response);
+    s.erase(std::remove_if(s.begin(), s.end(),
+                           [](unsigned char x)
+    {
+        return std::isspace(x);
+    }), s.end());
+    strncpy(response, s.c_str(), PEGASUS_LEN);
 }
 

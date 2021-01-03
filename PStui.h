@@ -54,6 +54,8 @@ uint8_t     FocusRelPosState;
 uint8_t     FocusReverseState;
 bool        isConnected;
 
+int         rc;
+
 float       reqUsrLimit[12];
 float       curUsrLimit[12];
 

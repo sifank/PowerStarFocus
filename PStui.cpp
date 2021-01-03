@@ -1,13 +1,13 @@
 /***************************************************************
-*  Program:      pstui.cpp
-*  Version:      20201216
+*  Program:      npstui.cpp
+*  Version:      20210102
 *  Author:       Sifan S. Kahale
 *  Description:  TUI based Power*Star control
 ****************************************************************/
 
 #include "PStui.h"
 
-float appVersion = 0.11;
+float appVersion = 0.12;
 
 char configFile[50] = "/etc/powerstar.config";
   
@@ -198,8 +198,9 @@ void printFaults(PSCTL& psctl) {
             if (faultstat & 0xff00)
                 printf("\033[1;31mFatal-FAULT: <%04X> \033[0m  ", ((faultstat & 0xff00) >> 16));
             
+            //TODO gave Non-Fatal msg but no other fault ..?
             if (faultstat & 0x00ff)
-                printf("\033[1;31mNon-FAULT: <%04X> \033[0m \n", (faultstat & 0x00ff));
+                printf("\033[1;31mNon-Fatal FAULT: <%04X> \033[0m \n", (faultstat & 0x00ff));
             
             // level 1 byte 1 (non fatal) faults
             if (faultstat & 0x00000002)
@@ -273,18 +274,18 @@ void printFaults(PSCTL& psctl) {
                 printf("Fatal: Internal 5V under-voltage\n");
             // 0x80000000 not used
     }
-    else
-        printf("No Faults\n");
+    //else
+        //printf("No Faults\n");
 }
 
 //************************************************************
-void printUserLimits(PSCTL& psctl) {
+void userLimitsMenu(PSCTL& psctl) {
+   while (true) {
+       
     psctl.getUserLimitStatus(curUsrLimit);
-    int rc = system("clear");
-    if(rc)
-        printMsg("Error: could not clear screen");
+    rc = system("clear");
     
-    printf("Power*Star User Limits\n");
+    printf("Power*Star User Limits\n\n");
     
     printf("                    Actual Request                       Actual Request\n");
     
@@ -312,14 +313,12 @@ void printUserLimits(PSCTL& psctl) {
            curUsrLimit[10], reqUsrLimit[10], 
            curUsrLimit[11], reqUsrLimit[11]
           );
+    
+    printFaults(psctl);
+    
     printf("\nActual values will be slightly different from requested\n");
-    printf("Cmd:  E'dit, then S'ave, R'eset or Q'uit?\n");
-}
+    printf("Cmd:  E'dit, then S'ave, R'eset or B'ack?\n");
 
-//************************************************************
-void userLimitsMenu(PSCTL& psctl) {
-   while (true) {
-        printUserLimits(psctl);
         
         printf("Command: ");
         getline(cin, cimput);
@@ -367,18 +366,14 @@ void userLimitsMenu(PSCTL& psctl) {
             }
             
             // return to previous menu
-            case 'q': {
-                bool saveProg = false;
-                askYN(&saveProg, "Save before returning?");
-                if (saveProg) {
-                    if ( ! updateProfile(psctl)) {
-                        printMsg("Error: save could not updated config file");
-                        break;
-                    }
+            case 'b': {
+                if ( ! updateProfile(psctl)) {
+                    printMsg("Error: save could not updated config file");
+                    break;
+                }
 
-                    if ( ! psctl.activateProfile(curProfile))
-                        printMsg("Problem activating profile");
-                    }
+                if ( ! psctl.activateProfile(curProfile))
+                    printMsg("Problem activating profile");
                 
                 break;
             }
@@ -387,21 +382,20 @@ void userLimitsMenu(PSCTL& psctl) {
             }
                         
         }
-        if (command == 'q')
+        if (command == 'b')
             break;
                 
     }
 }
-    
+
 //************************************************************
-void printProfile(PSCTL& psctl) {
+void profileMenu(PSCTL& psctl) {
+while (true) {
+
     actProfile = psctl.getProfileStatus();
     
-    int rc = system("clear");
-    if(rc)
-        printMsg("Error: could not clear screen");
-    
-    printf("Power*Star Settings\n");
+    rc = system("clear");
+    printf("Power*Star Focus Motor Profile\n");
     
     printf("                    Actual Requested                       Actual Requested\n");
     
@@ -478,30 +472,9 @@ void printProfile(PSCTL& psctl) {
            tempCompA.c_str(), tempCompP.c_str()
     );
     
+    printf("\nCmd: E'dit, R'eset, S'ave or B'ack?\n");
     
-    printf("\nOut1: %-10s  Dew1:  %-10s    USB1: %-10s  USB4:  %-10s\n",
-           curProfile.out1, curProfile.dew1, curProfile.usb1, curProfile.usb4
-          );
-    printf("Out2: %-10s  Dew2:  %-10s    USB2: %-10s  USB5:  %-10s\n",
-           curProfile.out2, curProfile.dew2, curProfile.usb2, curProfile.usb5
-          );
-    printf("Out3: %-10s  VAR:   %-10s    USB3: %-10s  USB6:  %-10s\n",
-           curProfile.out3, curProfile.var, curProfile.usb3, curProfile.usb6
-          );
-    printf("Out4: %-10s  MP:    %-10s    Ignore Fault Mask:     <%04x>\n",
-           curProfile.out4, curProfile.mp, curProfile.faultMask
-          );
-
-    printf("\nCmd: Set T'emplate or E'dit profile, L'imits, Set P'ort, U'sb Names\n");
-    printf("C'urrent or M'ax Position, R'eset or F'ault Mask then S'ave or Q'uit?\n");
-}
-   
-//************************************************************
-void settingsMenu(PSCTL& psctl) {
-   while (true) {
-        printProfile(psctl);
-        
-        printf("Command: ");
+    printf("Command: ");
         getline(cin, cimput);
         boost::algorithm::to_lower(cimput);
         char command = cimput[0];
@@ -673,48 +646,11 @@ void settingsMenu(PSCTL& psctl) {
                 
                 break;
             }
-  
-            // Port names
-            case 'p': {
-                askString(curProfile.out1, "Out1");
-                askString(curProfile.out2, "Out2");
-                askString(curProfile.out3, "Out3");
-                askString(curProfile.out4, "Out4");
-                askString(curProfile.var, "Var");
-                askString(curProfile.mp, "MP");
-                askString(curProfile.dew1, "Dew1");
-                askString(curProfile.dew2, "Dew2");
-                break;
-            }
-                    
-            // USB names
-            case 'u': {
-                askString(curProfile.usb1, "USB1");
-                askString(curProfile.usb2, "USB2");
-                askString(curProfile.usb3, "USB3");
-                askString(curProfile.usb4, "USB4");
-                askString(curProfile.usb5, "USB5");
-                askString(curProfile.usb6, "USB6");
-                break;
-            }
             
-            // save and activate Profile
-            case 's': {
-                if ( ! updateProfile(psctl)) {
-                    printMsg("Error: save could not updated config file");
-                    break;
-                }
-
-                if ( ! psctl.activateProfile(curProfile))
-                    printMsg("Problem activating profile");
+            // reset (select) focus motor template **********************
+            case 'r': {
                     
-            break;
-            }
-                    
-            // select focus motor template **********************
-            case 't': {
-                    
-                printf("hsm, pdms, uni12, user1? ");
+                printf("Select template: hsm, pdms, uni12, user1? ");
                 getline(cin, device);
                 boost::algorithm::to_lower(device);
 
@@ -731,6 +667,190 @@ void settingsMenu(PSCTL& psctl) {
                 break;
               }
               
+            // save and activate Profile
+            case 's': {
+                if ( ! updateProfile(psctl)) {
+                    printMsg("Error: save could not updated config file");
+                    break;
+                }
+
+                if ( ! psctl.activateProfile(curProfile))
+                    printMsg("Problem activating profile");
+                    
+                break;
+            }
+            
+            // return to previous menu
+            case 'b': {
+                if ( ! updateProfile(psctl)) {
+                    printMsg("Error: save could not updated config file");
+                    break;
+                }
+
+                if ( ! psctl.activateProfile(curProfile))
+                    printMsg("Problem activating profile");
+                
+                break;
+            }
+            
+            default: {
+            }
+                    
+        }
+        if (command == 'b')
+            break;
+                
+    }
+    
+}
+
+//************************************************************
+void focusMenu(PSCTL& psctl) {
+while (true) {
+
+    actProfile = psctl.getProfileStatus();
+    
+    rc = system("clear");
+    printf("Power*Star Focus Menu\n\n");
+    
+    uint8_t mtrStatus = psctl.getFocusStatus();
+    psctl.getAbsPosition(&curPos);
+    psctl.getMaxPosition(&maxPos);
+    
+    printf("Current Position: %u\n", curPos);
+    printf("Max Position:     %u\n", maxPos);
+    printf("Status:           %s\n\n", MotorMap.at(mtrStatus).c_str());
+    
+    printFaults(psctl);
+    
+    printf("('Enter' to refresh)\n");
+    printf("Cmd: I'n O'ut G'oto A'bort L'ock U'nlock\n");
+    printf("     C'urrent or M'ax Position, P'rofile, B'ack\n");
+    
+    printf("Command: ");
+        getline(cin, cimput);
+        boost::algorithm::to_lower(cimput);
+        char command = cimput[0];
+        switch(command) {
+            // focus goto position *********************************
+            case 'g' : {
+                uint32_t ncurPos;
+                printf("Move to absolute location? ");
+                getline(cin, action);
+
+                try {
+                    ncurPos = stoi(action);
+                }
+                catch (exception &err) {
+                    printf("ERROR: Current steps must be a number between 1 and %u\n", maxPos);
+                    getline(cin, message);
+                    break;
+                }
+                
+                if (ncurPos < 1 || ncurPos > maxPos) {
+                    printf("ERROR: Current steps must be between 1 and %u\n", maxPos);
+                    getline(cin, message);
+                    break;
+                }
+                
+                if (! psctl.MoveAbsFocuser(ncurPos) ) {
+                    printf("Error, could not move focuser\n");
+                    getline(cin, message);
+                }
+                break;
+            }
+                    
+            // focus go in x steps *********************************
+            case 'i' : {
+                uint32_t ncurPos;
+                printf("Move in how many steps? ");
+                getline(cin, action);
+
+                try {
+                    ncurPos = stoi(action);
+                }
+                catch (exception &err) {
+                    printf("ERROR: Current steps must be a number between 1 and %u\n", curPos);
+                    getline(cin, message);
+                    break;
+                }
+                
+                // calculate abs position
+                ncurPos = curPos - ncurPos;
+                
+                if (ncurPos < 1 || ncurPos > curPos) {
+                    printf("ERROR: Current steps must be between 1 and %u\n", curPos);
+                    getline(cin, message);
+                    break;
+                }
+                
+                if (! psctl.MoveAbsFocuser(ncurPos) ) {
+                    printf("Error, could not move focuser inward\n");
+                    getline(cin, message);
+                }
+                
+                break;  
+            }
+                    
+            // focus go out x steps *********************************
+            case 'o' : {
+                uint32_t ncurPos;
+                printf("Move out how many steps? ");
+                getline(cin, action);
+                //boost::algorithm::to_lower(action);
+                try {
+                    ncurPos = stoi(action);
+                }
+                catch (exception &err) {
+                    printf("ERROR: Current steps must be a number between 1 and %u\n", maxPos - curPos);
+                    getline(cin, message);
+                    break;
+                }
+            
+                if (ncurPos < 1 || ncurPos > (maxPos - curPos)) {
+                    printf("ERROR: Current steps must be between 1 and %u\n", (maxPos - curPos));
+                    getline(cin, message);
+                    break;
+                }
+                
+                // calculate abs position
+                ncurPos = curPos + ncurPos;
+                
+                if (! psctl.MoveAbsFocuser(ncurPos) ) {
+                    printf("Error, could not move focuser outward\n");
+                    getline(cin, message);
+                }
+                
+                break;
+            }
+                    
+            // focus abort movement ********************************
+            case 'a' : {
+                if ( ! psctl.AbortFocuser()) {
+                     printf("Error, could not abort\n");
+                    getline(cin, message);
+                }
+                break;
+            }
+                    
+            // focus lock motor ************************************
+            case 'l' : {
+                if ( ! psctl.lockFocusMtr()) {
+                    printf("Error, could not lock focus motor\n");
+                    getline(cin, message);
+                }
+                break;
+            }
+                    
+            // focus unlock motor **********************************
+            case 'u' : {
+                if ( ! psctl.unLockFocusMtr()) {
+                    printf("Error, could not unlock focus motor\n");
+                    getline(cin, message);
+                }
+                break;
+            }
+            
             // set max steps (position) ***********************
             case 'm' : {
                 uint32_t nmaxPos;
@@ -791,335 +911,89 @@ void settingsMenu(PSCTL& psctl) {
                 
                 break;
             }
-              
-            // Set fault mask
-            case 'f': { 
-                askMask(&curProfile.faultMask, 0x0002, "Input Over/Under Voltage Fault? ");
-                askMask(&curProfile.faultMask, 0x0004, "Input Over Current Fault? ");
-                askMask(&curProfile.faultMask, 0x0008, "Motor Temp Fault? ");
-                askMask(&curProfile.faultMask, 0x0010, "BiMotor Fault? ");
-                askMask(&curProfile.faultMask, 0x0020, "Internal power Fault? ");
-                askMask(&curProfile.faultMask, 0x0040, "Env Sensor Fault? ");
-                askMask(&curProfile.faultMask, 0x0080, "Var voltage over/under Fault? ");
-                               
-                askMask(&curProfile.faultMask, 0x0100, "Out1 Over Current Fault? ");
-                askMask(&curProfile.faultMask, 0x0200, "Out2 Over Current Fault? ");
-                askMask(&curProfile.faultMask, 0x0400, "Out3 Over Current Fault? ");
-                askMask(&curProfile.faultMask, 0x0800, "Out4 Over Current Fault? ");
-                askMask(&curProfile.faultMask, 0x1000, "Dew1 Over Current Fault? ");
-                askMask(&curProfile.faultMask, 0x2000, "Dew2 Over Current Fault? ");
-                askMask(&curProfile.faultMask, 0x4000, "MP Over Current Fault? ");
-                askMask(&curProfile.faultMask, 0x8000, "Position Change Fault? ");
-                
-                // save fault map to system
-                if ( ! psctl.saveDewPwmFault(curProfile))
-                        printMsg("Problem saving fault settings");
-                break;
-            }
             
-            // set user defined limits
-            case 'l': {
-                userLimitsMenu(psctl);
-                break;
-            }
-            
-            //TODO
-            // Reset all limits to defaults
-            case 'r': {
-                printMsg("Reset not implemented yet");
+            // Profile Menu  **********************************
+            case 'p' : {
+                profileMenu(psctl);
                 break;
             }
             
             // return to previous menu
-            case 'q': {
-                bool saveProg = false;
-                //askYN(&pwract, " ",false);
-                askYN(&saveProg, "Save before returning?");
-                if (saveProg) {
-                    if ( ! updateProfile(psctl)) {
-                        printMsg("Error: save could not updated config file");
-                        break;
-                    }
+            case 'b': {
+                if ( ! updateProfile(psctl)) {
+                    printMsg("Error: save could not updated config file");
+                    break;
+                }
 
-                    if ( ! psctl.activateProfile(curProfile))
-                        printMsg("Problem activating profile");
-                    }
+                if ( ! psctl.activateProfile(curProfile))
+                    printMsg("Problem activating profile");
                 
                 break;
             }
-                        
+            
             default: {
             }
-                        
+            
         }
-        if (command == 'q')
+        if (command == 'b')
             break;
-                
-    }
-}
-   
-//************************************************************
-void printStatus(PSCTL& psctl) {
-    psctl.getFaultStatus(curProfile.faultMask);
-    psctl.getStatus();
-    
-    int rc = system("clear");
-    if(rc)
-        printMsg("Error: could not clear screen");
-    
-    printf("Power*Star Status\n");
-    printf("Device           State Current  Auto   F1     F2       USB      State   Auto\n");
-    
-    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s\n",
-           curProfile.out1,
-           psctl.statusMap["Out1"].state ? "on" : "off",
-           psctl.statusMap["Out1"].current,
-           psctl.statusMap["Out1"].autoboot ? "on" : "off",
-           psctl.statusMap["Out1"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
-           psctl.statusMap["Out1"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
-           curProfile.usb1
-          );
-           //psctl.statusMap["USB1"].state ? "on" : "off",
-           //psctl.statusMap["USB1"].autoboot ? "on" : "off");
-    
-    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s%3s    %3s\n",
-           curProfile.out2,
-           psctl.statusMap["Out2"].state ? "on" : "off",
-           psctl.statusMap["Out2"].current,
-           psctl.statusMap["Out2"].autoboot ? "on" : "off",
-           psctl.statusMap["Out2"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
-           psctl.statusMap["Out2"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
-           curProfile.usb2,
-           psctl.statusMap["USB2"].state ? "on" : "off",
-           psctl.statusMap["USB2"].autoboot ? "on" : "off");
-    
-    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s%3s    %3s\n",
-           curProfile.out3,
-           psctl.statusMap["Out3"].state ? "on" : "off",
-           psctl.statusMap["Out3"].current,
-           psctl.statusMap["Out3"].autoboot ? "on" : "off",
-           psctl.statusMap["Out3"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
-           psctl.statusMap["Out3"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
-           curProfile.usb3,
-           psctl.statusMap["USB3"].state ? "on" : "off",
-           psctl.statusMap["USB3"].autoboot ? "on" : "off");
-    
-    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s\n",
-           curProfile.out4,
-           psctl.statusMap["Out4"].state ? "on" : "off",
-           psctl.statusMap["Out4"].current,
-           psctl.statusMap["Out4"].autoboot ? "on" : "off",
-           psctl.statusMap["Out4"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
-           psctl.statusMap["Out4"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
-          curProfile.usb4
-          );
-           //psctl.statusMap["USB4"].state ? "on" : "off",
-           //psctl.statusMap["USB4"].autoboot ? "on" : "off");
-    
-    int dewSetting = psctl.statusMap["Dew1"].setting;
-    string dewPercent = dewSetting ? to_string(psctl.statusMap["Dew1"].setting) : "off";
-    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s\n",
-           curProfile.dew1,
-           dewPercent.c_str(),
-           psctl.statusMap["Dew1"].current,
-           psctl.statusMap["Dew1"].autoboot ? "on" : "off",
-           psctl.statusMap["Dew1"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
-           psctl.statusMap["Dew1"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
-           curProfile.usb5
-           );
-           //psctl.statusMap["USB5"].state ? "on" : "off",
-           //psctl.statusMap["USB5"].autoboot ? "on" : "off");
-    
-        
-    dewSetting = psctl.statusMap["Dew2"].setting;
-    dewPercent = dewSetting ? to_string(psctl.statusMap["Dew2"].setting) : "off";
-    printf("%-17s %3s   %5.2f    %3s %5s  %5s       %-10s%3s    %3s\n",
-           curProfile.dew2,
-           dewPercent.c_str(),
-           psctl.statusMap["Dew2"].current,
-           psctl.statusMap["Dew2"].autoboot ? "on" : "off",
-           psctl.statusMap["Dew2"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
-           psctl.statusMap["Dew2"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
-           curProfile.usb6,
-           psctl.statusMap["USB6"].state ? "on" : "off",
-           psctl.statusMap["USB6"].autoboot ? "on" : "off");
-    
-    float varSetting = psctl.statusMap["Var"].levels;
-    char varField[17];
-    snprintf(varField, 17, "%s (%.1f)", curProfile.var, varSetting);
-    
-    printf("%-17s %3s   %5.2f    %3s %5s  %5s\n",
-           varField,
-           psctl.statusMap["Var"].state ? "on" : "off",
-           psctl.statusMap["Var"].current,
-           psctl.statusMap["Var"].autoboot ? "on" : "off",
-           psctl.statusMap["Var"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
-           psctl.statusMap["Var"].fault2 ? "\033[1;31mFAULT\033[0m" : "-");
-    
-    string mpSetting;
-    string mpPercent;
-    if (psctl.statusMap["MP"].setting == 0) {
-        mpSetting = "DC";
-        mpPercent = psctl.statusMap["MP"].state ? "on" : "off";
-    }
-    else if (psctl.statusMap["MP"].setting == 1) {
-        mpSetting = "PWM";
-        char varField[16];
-        snprintf(varField, 16, "%i", psctl.getPWM());
-        mpPercent = psctl.getPWM() ? varField : "off";
-    }
-    else {
-        mpSetting = "Dew";
-        char varField[16];
-        snprintf(varField, 16, "%i", psctl.getDew(2));
-        mpPercent = psctl.getDew(2) ? varField : "off";
-    }
-    char mpField[17];
-    snprintf(mpField, 17, "%s (%s)", curProfile.mp, mpSetting.c_str());
-    printf("%-16s  %3s   %5.2f    %3s %5s  %5s\n",
-           mpField,
-           mpPercent.c_str(),
-           psctl.statusMap["MP"].current,
-           psctl.statusMap["MP"].autoboot ? "on" : "off",
-           psctl.statusMap["MP"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
-           psctl.statusMap["MP"].fault2 ? "\033[1;31mFAULT\033[0m" : "-");
 
-    float Dp = psctl.statusMap["Temp"].levels - ((100 - psctl.statusMap["Hum"].levels)/5.0);
-    float DpDep = psctl.statusMap["Temp"].levels - Dp;
-    printf("\nTemp:     %4.1fF  Hum:    %4.1f%%    DewPoint   %4.1f   DP Dep    %4.1f\n",
-           psctl.statusMap["Temp"].levels,
-           psctl.statusMap["Hum"].levels,
-           Dp,
-           DpDep
-    );
+    }
     
-    float pswatts = psctl.statusMap["IN"].levels * psctl.statusMap["IN"].current;
-    printf("Volts-in: %5.2fV  Amps-in: %5.2fA    Watts    %5.2fW  Amp-Hrs: %6.1fAH Pwr\n",
-           psctl.statusMap["IN"].levels,
-           psctl.statusMap["IN"].current,
-           pswatts,
-           0.0
-    );
+}
+
+//************************************************************
+void autobootMenu(PSCTL& psctl) {
+while (true) {
+
+    actProfile = psctl.getProfileStatus();
     
-    uint8_t mtrStatus = psctl.getFocusStatus();
-    psctl.getAbsPosition(&curPos);
-    psctl.getMaxPosition(&maxPos);
-    printf("Current: %u   Max:  %u  Profile:  %s  Status: %s\n", 
-           curPos,
-           maxPos, 
-           curProfile.name,
-           MotorMap.at(mtrStatus).c_str()
-    );
+    rc = system("clear");
+    printf("Power*Star AutoBoot Menu\n");
+    printf("\nAutoBoot Status:\n");
+    printf("         PORTS                  USB\n");
+    printf("%-17s %3s   %-10s    %3s\n",
+           curProfile.out1, psctl.statusMap["Out1"].autoboot ? "on" : "off",
+           curProfile.usb2, psctl.statusMap["USB2"].autoboot ? "on" : "off"
+          );
+
+    printf("%-17s %3s   %-10s    %3s\n",
+           curProfile.out2, psctl.statusMap["Out2"].autoboot ? "on" : "off",
+           curProfile.usb3, psctl.statusMap["USB3"].autoboot ? "on" : "off"
+           );
     
-    uint16_t fvir = psctl.getVersion();
-    printf("LED Brightness  %i  Versions: Firmware: %i.%i App %.1f\n",
-           (psctl.statusMap["LED"].setting /4),
-           (fvir & 0xff00) / 256,
-           fvir & 0x00ff,
-           appVersion
-    );
+    printf("%-17s %3s   %-10s    %3s\n",
+           curProfile.out3, psctl.statusMap["Out3"].autoboot ? "on" : "off",
+           curProfile.usb6, psctl.statusMap["USB6"].autoboot ? "on" : "off"
+           );
+    
+    printf("%-17s %3s\n",
+           curProfile.out4, psctl.statusMap["Out4"].autoboot ? "on" : "off");
+    
+    printf("         OTHER                  DEW\n");
+    
+    printf("%-17s %3s   %-10s    %3s\n",
+           curProfile.var, psctl.statusMap["Var"].autoboot ? "on" : "off",
+           curProfile.dew1, psctl.statusMap["Dew1"].autoboot ? "on" : "off"
+          );
+    
+    printf("%-17s %3s   %-10s    %3s\n",
+           curProfile.mp, psctl.statusMap["MP"].autoboot ? "on" : "off",
+           curProfile.dew2, psctl.statusMap["Dew2"].autoboot ? "on" : "off"
+           );
     
     printFaults(psctl);
         
-    printf("\nCmd: P'ower autoB'oot D'ew V'ariable-port M'ulti-port \n");
-    printf("     Focus: I'n O'ut G'oto A'bort L'ock U'nlock\n");
-    printf("     LE'D S'ettings C'lear-faults R'estart Q'uit\n");
-}
-
-//************************************************************
-int main (int argc, char* argv[])
-{    
-    PSCTL psctl;
+    printf("\nCmd: S'et, R'eset, B'ack\n");
     
-    if (psctl.Connect())
-    {
-     // check that the config file exits, create it if not
-     int rc;
-     FILE* fin = fopen(configFile, "r");
-     if (!fin) {
-        printMsg("Error: can not find .ini file - will create one");
-        // not found, so create it
-        FILE* fin = fopen(configFile, "w+");
-        if (!fin){
-         	printMsg("Error: need to run this as root to create the config file");
-         	return false;
-    	}
-        fclose(fin);
-        chmod(configFile, S_IROTH|S_IWOTH);
-        
-        // and initialize it to unipolar
-        curProfile = UNI_12V;
-        if (!updateProfile(psctl)) {
-            printMsg("Error: startup could not update config file");
-            return false;
-        }
-     }
-     
-     // now open it for business
-     fin = fopen(configFile, "r");
-     rc = fread(&curProfile, sizeof(PowerStarProfile), 1, fin);
-     
-     if (!rc) {
-        printMsg("Error: could not read entire profile");
-        return false;
-     }
-     fclose(fin);
-    
-    isConnected = true;
-    
-    // unlock focus motor
-    psctl.unLockFocusMtr();
-    
-    // set requested user limits initially to current limits on P*S
-    psctl.getUserLimitStatus(reqUsrLimit);
-
-    while (true) {    
-        printStatus(psctl);        
-        printf("Command: ");
+    printf("Command: ");
         getline(cin, cimput);
         boost::algorithm::to_lower(device);
         char command = cimput[0];
 
         switch(command) {
-        
-            // Change profile settings
-            case 's': {
-                settingsMenu(psctl);
-                break;              
-            }
-        
-            // turn output pwr and usb on/off
-            case 'p': {;
-                char pwrdev[11] = " ";
-                askString(pwrdev, "device name", false);
-                boost::algorithm::to_lower(pwrdev);
-                device = string(pwrdev);
-                
-                if (device == "mp" &&  psctl.statusMap["MP"].setting != 0) {
-                    printMsg("MP is not set to DC, use the M' command to change Dew or PWM settings");
-                    break;
-                }
-                
-                if (device == "usb1" || device == "usb4" || device == "usb5") {
-                    printf("USB1,4,5 are not switchable\n");
-                    break;
-                }
-
-                bool pwract;
-                askYN(&pwract, " ",false);
-                if ( pwract)
-                    action = "yes";
-                else
-                    action = "no";
-
-                if (! psctl.setPowerState(device, action))
-                    printMsg("Problem configuring power");
-                
-                break;
-            }
-            
             // set auto boot
-            case 'b' : {
+            case 'a' : {
                 printf("Which device: ");
                 getline(cin, device);
                 
@@ -1133,6 +1007,250 @@ int main (int argc, char* argv[])
                     printMsg("Problem setting Autoboot");
                 
                 break;
+            }
+            
+            // back
+            case 'b' : {
+                break;
+            }
+            
+            default: {
+            }
+        }
+        if (command == 'b')
+            break;
+    }
+}
+
+//************************************************************
+void faultMenu(PSCTL& psctl) {
+while (true) {
+
+    actProfile = psctl.getProfileStatus();
+    
+    rc = system("clear");
+    printf("Power*Star Fault Menu\n");
+    printf("\nFaults Ignored:\n");
+    printf("Out1 Over Current Fault    %3s  Input Over/Under Voltage Fault %s\n",
+           (curProfile.faultMask & 0x0100) ? "No" : "Yes",
+           (curProfile.faultMask & 0x0002) ? "No" : "Yes");
+    printf("Out2 Over Current Fault    %3s  Input Over Current Fault       %s\n",
+           (curProfile.faultMask & 0x0200) ? "No" : "Yes",
+           (curProfile.faultMask & 0x0004) ? "No" : "Yes");
+    printf("Out3 Over Current Fault    %3s  Motor Temp Fault               %s\n",
+           (curProfile.faultMask & 0x0400) ? "No" : "Yes",
+           (curProfile.faultMask & 0x0008) ? "No" : "Yes");
+    printf("Out4 Over Current Fault    %3s  BiMotor Fault                  %s\n",
+           (curProfile.faultMask & 0x0800) ? "No" : "Yes",
+           (curProfile.faultMask & 0x0010) ? "No" : "Yes");
+    printf("Dew1 Over Current Fault    %3s  Internal power Fault           %s\n",
+           (curProfile.faultMask & 0x1000) ? "No" : "Yes",
+           (curProfile.faultMask & 0x0020) ? "No" : "Yes");
+    printf("Dew2 Over Current Fault    %3s  Env Sensor Fault               %s\n",
+           (curProfile.faultMask & 0x2000) ? "No" : "Yes",
+           (curProfile.faultMask & 0x0040) ? "No" : "Yes");
+    printf("MP Over Current Fault      %3s  Var voltage over/under Fault   %s\n",
+           (curProfile.faultMask & 0x4000) ? "No" : "Yes",
+           (curProfile.faultMask & 0x0080) ? "No" : "Yes");
+    printf("Position Change Fault       %s\n",
+           (curProfile.faultMask & 0x8000) ? "No" : "Yes");
+    
+    printf("\nIgnore Fault Mask:     <%04x>\n",
+            curProfile.faultMask
+          );
+    
+    printFaults(psctl);
+    
+    printf("\nCmd: E'dit or R'eset fault mask, C'lear faults, B'ack\n");
+        
+        printf("Command: ");
+        getline(cin, cimput);
+        boost::algorithm::to_lower(cimput);
+        char command = cimput[0];
+        switch(command) {
+            // clear faults
+            case 'c' : {
+                if ( ! psctl.clearFaults()) {
+                    printMsg("Problem clearing faults");
+                    break;
+                }
+
+                psctl.clearFaultStatus();
+                break;
+            }
+            
+            // Set fault mask
+            case 'e': { 
+                askMask(&curProfile.faultMask, 0x0002, "Input Over/Under Voltage Fault? ");
+                askMask(&curProfile.faultMask, 0x0004, "Input Over Current Fault?       ");
+                askMask(&curProfile.faultMask, 0x0008, "Motor Temp Fault?               ");
+                askMask(&curProfile.faultMask, 0x0010, "BiMotor Fault?                  ");
+                askMask(&curProfile.faultMask, 0x0020, "Internal power Fault?           ");
+                askMask(&curProfile.faultMask, 0x0040, "Env Sensor Fault?               ");
+                askMask(&curProfile.faultMask, 0x0080, "Var voltage over/under Fault?   ");
+                               
+                askMask(&curProfile.faultMask, 0x0100, "Out1 Over Current Fault?       ");
+                askMask(&curProfile.faultMask, 0x0200, "Out2 Over Current Fault?       ");
+                askMask(&curProfile.faultMask, 0x0400, "Out3 Over Current Fault?       ");
+                askMask(&curProfile.faultMask, 0x0800, "Out4 Over Current Fault?       ");
+                askMask(&curProfile.faultMask, 0x1000, "Dew1 Over Current Fault?       ");
+                askMask(&curProfile.faultMask, 0x2000, "Dew2 Over Current Fault?       ");
+                askMask(&curProfile.faultMask, 0x4000, "MP Over Current Fault?        ");
+                askMask(&curProfile.faultMask, 0x8000, "Position Change Fault?         ");
+                
+                // save fault map to system
+                if ( ! psctl.saveDewPwmFault(curProfile))
+                        printMsg("Problem saving fault settings");
+                break;
+            }
+            
+            // reset (clear) fault mask
+            case 'r': {
+                curProfile.faultMask = 0xffff;
+                // save fault map to system
+                if ( ! psctl.saveDewPwmFault(curProfile))
+                        printMsg("Problem saving fault settings");
+                break;
+            }
+            
+            // return to previous menu
+            case 'b': {                
+                break;
+            }
+                        
+            default: {
+            }
+                        
+        }
+        if (command == 'b')
+            break;
+   }
+}
+    
+//************************************************************
+void settingsMenu(PSCTL& psctl) {
+   while (true) {
+
+    actProfile = psctl.getProfileStatus();
+    
+    rc = system("clear");
+    
+    printf("Power*Star Settings\n\n");
+    
+    uint16_t fvir = psctl.getVersion();
+    printf("Firmware Ver: %i.%i  TUI Ver %.1f\n\n",
+           (fvir & 0xff00) / 256, fvir & 0x00ff, appVersion);
+    
+    printf("Port Names:\n");
+    printf("Out1: %-10s      USB1: %-10s\n",
+           curProfile.out1, curProfile.usb1);
+    printf("Out2: %-10s      USB2: %-10s\n",
+           curProfile.out2, curProfile.usb2);
+    printf("Out3: %-10s      USB3: %-10s\n",
+           curProfile.out3, curProfile.usb3);
+    printf("Out4: %-10s      USB4: %-10s\n",
+           curProfile.out4, curProfile.usb4);
+    printf("DEW1: %-10s      USB5: %-10s\n",
+           curProfile.dew1, curProfile.usb5);
+    printf("DEW2: %-10s      USB6: %-10s\n\n",
+           curProfile.dew2, curProfile.usb6);
+    
+    printf("VAR:  %-10s  Set to: %.1fV\n",
+           curProfile.var, psctl.statusMap["Var"].levels);
+    
+    string mpSetting;
+    string mpPercent;
+    char varField[16];
+    if (psctl.statusMap["MP"].setting == 0) {
+        mpSetting = "DC";
+        snprintf(varField, 16, "%-sV", "12");
+        mpPercent = psctl.statusMap["MP"].state ? "on" : "off";
+    }
+    else if (psctl.statusMap["MP"].setting == 1) {
+        mpSetting = "PWM";
+        snprintf(varField, 16, "%-i", psctl.getPWM());
+        mpPercent = psctl.getPWM() ? varField : "off";
+    }
+    else {
+        mpSetting = "Dew";
+        snprintf(varField, 16, "%-i%%", psctl.getDew(2));
+        mpPercent = psctl.getDew(2) ? varField : "off";
+    }
+    printf("MP:   %-10s  Set as: %3s   Value: %5s\n",
+           curProfile.mp,
+           mpSetting.c_str(),
+           varField);
+    
+    printf("LED Brightness    %i\n",
+           (psctl.statusMap["LED"].setting /4));
+    
+    printFaults(psctl);
+
+    printf("\nCmd: LE'D, L'imits, Set P'ort, U'sb Names, V'ar, M'P\n");
+    printf("     A'utoboot, then S'ave or B'ack?\n");
+        
+        printf("Command: ");
+        getline(cin, cimput);
+        boost::algorithm::to_lower(cimput);
+        char command = cimput[0];
+        switch(command) {
+            // set auto boot
+            case 'a' : {
+                autobootMenu(psctl);
+                break;
+            }
+  
+            // Port names
+            case 'p': {
+                askString(curProfile.out1, "Out1");
+                askString(curProfile.out2, "Out2");
+                askString(curProfile.out3, "Out3");
+                askString(curProfile.out4, "Out4");
+                askString(curProfile.var, "Var");
+                askString(curProfile.mp, "MP");
+                askString(curProfile.dew1, "Dew1");
+                askString(curProfile.dew2, "Dew2");
+                break;
+            }
+                    
+            // USB names
+            case 'u': {
+                askString(curProfile.usb1, "USB1");
+                askString(curProfile.usb2, "USB2");
+                askString(curProfile.usb3, "USB3");
+                askString(curProfile.usb4, "USB4");
+                askString(curProfile.usb5, "USB5");
+                askString(curProfile.usb6, "USB6");
+                break;
+            }
+            
+            // LED brightness
+            case 'e' : {
+                uint8_t usract = 0;
+                askUint8(&usract, 0, 3, "LED Brightness", false);
+                
+                // this maps 0-3 to the 0-15 segmented value 
+                uint8_t susract = (usract * 4 ) + 1;
+                
+                if ( ! psctl.setLED(susract)) {
+                    printMsg("Problem setting LED brightness");
+                    break;
+                }
+
+                break;
+            }
+            
+            // save and activate Profile
+            case 's': {
+                if ( ! updateProfile(psctl)) {
+                    printMsg("Error: save could not updated config file");
+                    break;
+                }
+
+                if ( ! psctl.activateProfile(curProfile))
+                    printMsg("Problem activating profile");
+                    
+            break;
             }
             
             // set variable voltage port
@@ -1149,22 +1267,6 @@ int main (int argc, char* argv[])
                     printMsg("Problem setting Var voltage");
                 
                 break;
-            }
-
-            case 'e' : {
-                uint8_t usract = 0;
-                askUint8(&usract, 0, 3, "LED Brightness", false);
-                
-                // this maps 0-3 to the 0-15 segmented value 
-                uint8_t susract = (usract * 4 ) + 1;
-                
-                if ( ! psctl.setLED(susract)) {
-                    printMsg("Problem setting LED brightness");
-                    break;
-                }
-
-                break;
-                
             }
             
             // set multiport type (DC, PWM, DEW)
@@ -1266,123 +1368,214 @@ int main (int argc, char* argv[])
                 break;
             }
             
-            // focus goto position *********************************
-            case 'g' : {
-                uint32_t ncurPos;
-                printf("Move to absolute location? ");
-                getline(cin, action);
-
-                try {
-                    ncurPos = stoi(action);
-                }
-                catch (exception &err) {
-                    printf("ERROR: Current steps must be a number between 1 and %u\n", maxPos);
-                    getline(cin, message);
-                    break;
-                }
-                
-                if (ncurPos < 1 || ncurPos > maxPos) {
-                    printf("ERROR: Current steps must be between 1 and %u\n", maxPos);
-                    getline(cin, message);
-                    break;
-                }
-                
-                if (! psctl.MoveAbsFocuser(ncurPos) ) {
-                    printf("Error, could not move focuser\n");
-                    getline(cin, message);
-                }
+            // set user defined limits
+            case 'l': {
+                userLimitsMenu(psctl);
                 break;
             }
-                    
-            // focus go in x steps *********************************
-            case 'i' : {
-                uint32_t ncurPos;
-                printf("Move in how many steps? ");
-                getline(cin, action);
-
-                try {
-                    ncurPos = stoi(action);
-                }
-                catch (exception &err) {
-                    printf("ERROR: Current steps must be a number between 1 and %u\n", curPos);
-                    getline(cin, message);
-                    break;
-                }
-                
-                // calculate abs position
-                ncurPos = curPos - ncurPos;
-                
-                if (ncurPos < 1 || ncurPos > curPos) {
-                    printf("ERROR: Current steps must be between 1 and %u\n", curPos);
-                    getline(cin, message);
-                    break;
-                }
-                
-                if (! psctl.MoveAbsFocuser(ncurPos) ) {
-                    printf("Error, could not move focuser inward\n");
-                    getline(cin, message);
-                }
-                
-                break;  
-                
-            }
-                    
-            // focus go out x steps *********************************
-            case 'o' : {
-                uint32_t ncurPos;
-                printf("Move out how many steps? ");
-                getline(cin, action);
-                //boost::algorithm::to_lower(action);
-                try {
-                    ncurPos = stoi(action);
-                }
-                catch (exception &err) {
-                    printf("ERROR: Current steps must be a number between 1 and %u\n", maxPos - curPos);
-                    getline(cin, message);
-                    break;
-                }
             
-                if (ncurPos < 1 || ncurPos > (maxPos - curPos)) {
-                    printf("ERROR: Current steps must be between 1 and %u\n", (maxPos - curPos));
-                    getline(cin, message);
+            // return to previous menu
+            case 'b': {
+                if ( ! updateProfile(psctl)) {
+                    printMsg("Error: save could not updated config file");
+                    break;
+                }
+
+                if ( ! psctl.activateProfile(curProfile))
+                    printMsg("Problem activating profile");
+                
+                break;
+            }
+                        
+            default: {
+            }
+                        
+        }
+        if (command == 'b')
+            break;
+                
+    }
+}
+   
+//************************************************************
+void mainMenu(PSCTL& psctl) {
+while (true) {
+    psctl.getStatus();
+    
+    rc = system("clear");
+
+    printf("Power*Star Main Menu\n");
+    printf("\nDevice           State Current      F1     F2       USB      State\n");
+    
+    printf("%-17s %3s   %5.2f    %5s  %5s       %-10s\n",
+           curProfile.out1,
+           psctl.statusMap["Out1"].state ? "on" : "off",
+           psctl.statusMap["Out1"].current,
+           psctl.statusMap["Out1"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
+           psctl.statusMap["Out1"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
+           curProfile.usb1
+          );
+
+    printf("%-17s %3s   %5.2f    %5s  %5s       %-10s%3s\n",
+           curProfile.out2,
+           psctl.statusMap["Out2"].state ? "on" : "off",
+           psctl.statusMap["Out2"].current,
+           psctl.statusMap["Out2"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
+           psctl.statusMap["Out2"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
+           curProfile.usb2,
+           psctl.statusMap["USB2"].state ? "on" : "off");
+    
+    printf("%-17s %3s   %5.2f    %5s  %5s       %-10s%3s\n",
+           curProfile.out3,
+           psctl.statusMap["Out3"].state ? "on" : "off",
+           psctl.statusMap["Out3"].current,
+           psctl.statusMap["Out3"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
+           psctl.statusMap["Out3"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
+           curProfile.usb3,
+           psctl.statusMap["USB3"].state ? "on" : "off");
+    
+    printf("%-17s %3s   %5.2f    %5s  %5s       %-10s\n",
+           curProfile.out4,
+           psctl.statusMap["Out4"].state ? "on" : "off",
+           psctl.statusMap["Out4"].current,
+           psctl.statusMap["Out4"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
+           psctl.statusMap["Out4"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
+          curProfile.usb4
+          );
+    
+    int dewSetting = psctl.statusMap["Dew1"].setting;
+    string dewPercent = dewSetting ? to_string(psctl.statusMap["Dew1"].setting) : "off";
+    printf("%-17s %3s   %5.2f    %5s  %5s       %-10s\n",
+           curProfile.dew1,
+           dewPercent.c_str(),
+           psctl.statusMap["Dew1"].current,
+           psctl.statusMap["Dew1"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
+           psctl.statusMap["Dew1"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
+           curProfile.usb5
+           );
+    
+        
+    dewSetting = psctl.statusMap["Dew2"].setting;
+    dewPercent = dewSetting ? to_string(psctl.statusMap["Dew2"].setting) : "off";
+    printf("%-17s %3s   %5.2f    %5s  %5s       %-10s%3s\n",
+           curProfile.dew2,
+           dewPercent.c_str(),
+           psctl.statusMap["Dew2"].current,
+           psctl.statusMap["Dew2"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
+           psctl.statusMap["Dew2"].fault2 ? "\033[1;31mFAULT\033[0m" : "-",
+           curProfile.usb6,
+           psctl.statusMap["USB6"].state ? "on" : "off");
+    
+    float varSetting = psctl.statusMap["Var"].levels;
+    char varField[17];
+    snprintf(varField, 17, "%s (%.1f)", curProfile.var, varSetting);
+    
+    printf("%-17s %3s   %5.2f    %5s  %5s\n",
+           varField,
+           psctl.statusMap["Var"].state ? "on" : "off",
+           psctl.statusMap["Var"].current,
+           psctl.statusMap["Var"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
+           psctl.statusMap["Var"].fault2 ? "\033[1;31mFAULT\033[0m" : "-");
+    
+    string mpSetting;
+    string mpPercent;
+    if (psctl.statusMap["MP"].setting == 0) {
+        mpSetting = "DC";
+        mpPercent = psctl.statusMap["MP"].state ? "on" : "off";
+    }
+    else if (psctl.statusMap["MP"].setting == 1) {
+        mpSetting = "PWM";
+        char varField[16];
+        snprintf(varField, 16, "%i", psctl.getPWM());
+        mpPercent = psctl.getPWM() ? varField : "off";
+    }
+    else {
+        mpSetting = "Dew";
+        char varField[16];
+        snprintf(varField, 16, "%i", psctl.getDew(2));
+        mpPercent = psctl.getDew(2) ? varField : "off";
+    }
+    char mpField[17];
+    snprintf(mpField, 17, "%s (%s)", curProfile.mp, mpSetting.c_str());
+    printf("%-16s  %3s   %5.2f    %5s  %5s\n",
+           mpField,
+           mpPercent.c_str(),
+           psctl.statusMap["MP"].current,
+           psctl.statusMap["MP"].fault1 ? "\033[1;31mFAULT\033[0m" : "-",   
+           psctl.statusMap["MP"].fault2 ? "\033[1;31mFAULT\033[0m" : "-");
+
+    float Dp = psctl.statusMap["Temp"].levels - ((100 - psctl.statusMap["Hum"].levels)/5.0);
+    float DpDep = psctl.statusMap["Temp"].levels - Dp;
+    printf("\nTemp:     %4.1fF  Hum:      %4.1f%%   DewPoint %4.1fF   DP Dep      %4.1fF\n",
+           psctl.statusMap["Temp"].levels,
+           psctl.statusMap["Hum"].levels,
+           Dp,
+           DpDep
+    );
+    
+    float pswatts = psctl.statusMap["IN"].levels * psctl.statusMap["IN"].current;
+    printf("Volts-in: %5.2fV Amps-in: %5.2fA   Watts    %5.2fW  Amp-Hrs:  %6.1fAH\n",
+           psctl.statusMap["IN"].levels,
+           psctl.statusMap["IN"].current,
+           pswatts,
+           0.0
+    );
+
+    printFaults(psctl);
+        
+    printf("\nCmd: P'ower D'ew, F'ocus, H'andle Faults, S'ettings, R'estart Q'uit\n");
+    
+    printf("Command: ");
+        getline(cin, cimput);
+        boost::algorithm::to_lower(device);
+        char command = cimput[0];
+
+        switch(command) {
+            // Change settings
+            case 's': {
+                settingsMenu(psctl);
+                break;              
+            }
+            
+            // Focus Menu
+            case 'f': {
+                focusMenu(psctl);
+                break;              
+            }
+            
+            // Faults Menu
+            case 'h': {
+                faultMenu(psctl);
+                break;              
+            }
+        
+            // turn output pwr and usb on/off
+            case 'p': {;
+                char pwrdev[11] = " ";
+                askString(pwrdev, "device name", false);
+                boost::algorithm::to_lower(pwrdev);
+                device = string(pwrdev);
+                
+                if (device == "mp" &&  psctl.statusMap["MP"].setting != 0) {
+                    printMsg("MP is not set to DC, use the M' command to change Dew or PWM settings");
                     break;
                 }
                 
-                // calculate abs position
-                ncurPos = curPos + ncurPos;
+                if (device == "usb1" || device == "usb4" || device == "usb5") {
+                    printf("USB1,4,5 are not switchable\n");
+                    break;
+                }
+
+                bool pwract;
+                askYN(&pwract, " ",false);
+                if ( pwract)
+                    action = "yes";
+                else
+                    action = "no";
+
+                if (! psctl.setPowerState(device, action))
+                    printMsg("Problem configuring power");
                 
-                if (! psctl.MoveAbsFocuser(ncurPos) ) {
-                    printf("Error, could not move focuser outward\n");
-                    getline(cin, message);
-                }
-                
-                break;
-            }
-                    
-            // focus abort movement ********************************
-            case 'a' : {
-                if ( ! psctl.AbortFocuser()) {
-                     printf("Error, could not abort\n");
-                    getline(cin, message);
-                }
-                break;
-            }
-                    
-            // focus lock motor ************************************
-            case 'l' : {
-                if ( ! psctl.lockFocusMtr()) {
-                    printf("Error, could not lock focus motor\n");
-                    getline(cin, message);
-                }
-                break;
-            }
-                    
-            // focus unlock motor **********************************
-            case 'u' : {
-                if ( ! psctl.unLockFocusMtr()) {
-                    printf("Error, could not unlock focus motor\n");
-                    getline(cin, message);
-                }
                 break;
             }
             
@@ -1440,18 +1633,7 @@ int main (int argc, char* argv[])
                 psctl.restart();
                 psctl.Disconnect();
                 printf("Restarting: wait a moment before running this program again\n");
-                return true;
-            }
-                        
-            // clear faults
-            case 'c' : {
-                if ( ! psctl.clearFaults()) {
-                    printMsg("Problem clearing faults");
-                    break;
-                }
-
-                psctl.clearFaultStatus();
-                break;
+                return;
             }
             
             // quit
@@ -1460,17 +1642,69 @@ int main (int argc, char* argv[])
 
                 psctl.lockFocusMtr();
                 psctl.Disconnect();
-                return true;
+                return;
             }
             
             default: {
             }
         }           
       }
-        psctl.Disconnect();
+}
+
+//************************************************************
+int main (int argc, char* argv[])
+{    
+    PSCTL psctl;
+    
+    if (psctl.Connect())
+    {
+     // check that the config file exits, create it if not
+     int rc;
+     FILE* fin = fopen(configFile, "r");
+     if (!fin) {
+        printMsg("Error: can not find .ini file - will create one");
+        // not found, so create it
+        FILE* fin = fopen(configFile, "w+");
+        if (!fin){
+         	printMsg("Error: need to run this as root to create the config file");
+         	return false;
+    	}
+        fclose(fin);
+        chmod(configFile, S_IROTH|S_IWOTH);
+        
+        // and initialize it to unipolar
+        curProfile = UNI_12V;
+        if (!updateProfile(psctl)) {
+            printMsg("Error: startup could not update config file");
+            return false;
+        }
+     }
+     
+     // now open it for business
+     fin = fopen(configFile, "r");
+     rc = fread(&curProfile, sizeof(PowerStarProfile), 1, fin);
+     
+     if (!rc) {
+        printMsg("Error: could not read entire profile");
+        return false;
+     }
+     fclose(fin);
+    
+    isConnected = true;
+    
+    // unlock focus motor
+    psctl.unLockFocusMtr();
+    
+    // set requested user limits initially to current limits on P*S
+    psctl.getUserLimitStatus(reqUsrLimit);
+
+    mainMenu(psctl);
+        
+            
+    psctl.Disconnect();
         return true;
         
     }
-        printf("Error:  could not connect\n");
-        return false;
+    printf("Error:  could not connect to Power*Star\n");
+    return false;
 }
