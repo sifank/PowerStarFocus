@@ -8,7 +8,7 @@ INDI-core
 
 CONTENTS:
 - INDI driver and xml files
-  - Only the focus functions are implemented so far
+  - Only the focus functions are implemented in this driver
 - TUI (text user interface) called 'pstui'
   - This allows complete manual control from a terminal window
     of all functions and capabilities
@@ -17,14 +17,14 @@ INSTALLING:
 In a work directory of your choosing on the RPI 
 or (linux) system that the Power*Star is plugged into:
 
-git clone https://github.com/sifank/PowerStar.git
+git clone https://github.com/sifank/PowerStarFocus.git
 
 Binary files for the Raspberry Pi are included:
-cd PowerStar
+cd PowerStarFocus
 sudo make install
 
 To compile from scratch:
-cd PowerStar;
+cd PowerStarFocus;
 make clean; make
 sudo make install
 
