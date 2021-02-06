@@ -1,5 +1,7 @@
-# Power*Star
-INDI drivers for Greg's Power*Star, also known as FeatherTouch Power*Star
+# Power*Star-Focus
+INDI driver for Greg's Power*Star Focuser, also known as FeatherTouch Power*Star
+
+This is one of three INDI drivers (Focuser, Power, Weather)
 
 REQUIRES: 
 INDI-core
