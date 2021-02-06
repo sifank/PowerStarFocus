@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<driversList>
-<devGroup group="Focusers">
-	<device label="PowerStar">
-		<driver name="PowerStar">indi_powerstar</driver>
-		<version>2.3</version>
-	</device>
-</devGroup>
-</driversList>

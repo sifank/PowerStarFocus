@@ -1,5 +1,5 @@
 /***************************************************************
-*  Program:      npstui.cpp
+*  Program:      pstui.cpp
 *  Version:      20210102
 *  Author:       Sifan S. Kahale
 *  Description:  TUI based Power*Star control
@@ -946,45 +946,46 @@ while (true) {
 void autobootMenu(PSCTL& psctl) {
 while (true) {
 
+    psctl.getStatus();
     actProfile = psctl.getProfileStatus();
     
     rc = system("clear");
     printf("Power*Star AutoBoot Menu\n");
     printf("\nAutoBoot Status:\n");
     printf("         PORTS                  USB\n");
-    printf("%-17s %3s   %-10s    %3s\n",
+    printf("1: %-17s %3s    6: %-10s    %3s\n",
            curProfile.out1, psctl.statusMap["Out1"].autoboot ? "on" : "off",
            curProfile.usb2, psctl.statusMap["USB2"].autoboot ? "on" : "off"
           );
 
-    printf("%-17s %3s   %-10s    %3s\n",
+    printf("2: %-17s %3s    7: %-10s    %3s\n",
            curProfile.out2, psctl.statusMap["Out2"].autoboot ? "on" : "off",
            curProfile.usb3, psctl.statusMap["USB3"].autoboot ? "on" : "off"
            );
     
-    printf("%-17s %3s   %-10s    %3s\n",
+    printf("3: %-17s %3s   10: %-10s    %3s\n",
            curProfile.out3, psctl.statusMap["Out3"].autoboot ? "on" : "off",
            curProfile.usb6, psctl.statusMap["USB6"].autoboot ? "on" : "off"
            );
     
-    printf("%-17s %3s\n",
+    printf("4: %-17s %3s\n",
            curProfile.out4, psctl.statusMap["Out4"].autoboot ? "on" : "off");
     
     printf("         OTHER                  DEW\n");
     
-    printf("%-17s %3s   %-10s    %3s\n",
+    printf("14: %-17s %3s   11: %-10s    %3s\n",
            curProfile.var, psctl.statusMap["Var"].autoboot ? "on" : "off",
            curProfile.dew1, psctl.statusMap["Dew1"].autoboot ? "on" : "off"
           );
     
-    printf("%-17s %3s   %-10s    %3s\n",
+    printf("13: %-17s %3s   12: %-10s    %3s\n",
            curProfile.mp, psctl.statusMap["MP"].autoboot ? "on" : "off",
            curProfile.dew2, psctl.statusMap["Dew2"].autoboot ? "on" : "off"
            );
     
     printFaults(psctl);
         
-    printf("\nCmd: S'et, R'eset, B'ack\n");
+    printf("\nCmd: E'dit, R'eset, B'ack\n");
     
     printf("Command: ");
         getline(cin, cimput);
@@ -993,15 +994,34 @@ while (true) {
 
         switch(command) {
             // set auto boot
-            case 'a' : {
-                printf("Which device: ");
-                getline(cin, device);
+            case 'e' : {
+                printf("Device Number: ");
+                getline(cin, action);
+                
+                boost::algorithm::to_lower(action);
+                uint8_t usract;
+                try {
+                    usract = stoi(action);
+                }
+                catch (exception &err) {
+                    printMsg("ERROR: Device must be a number between 1 and 14");
+                    break;
+                }
+                if (usract < 1 || usract > 14) {
+                    printMsg("ERROR: Device must be between 1 and 14");
+                    break;
+                }
+                
+                device =  psctl.Devices[usract-1];
+                boost::algorithm::to_lower(device);
                 
                 printf("On or Off? ");
                 getline(cin, action);
-                
-                boost::algorithm::to_lower(device);
+           
                 boost::algorithm::to_lower(action);
+                
+                printf("DIAG: Dev # %i is device: %s", usract, device.c_str());
+                printMsg(" ");
         
                 if ( ! psctl.setAutoBoot(device, action))
                     printMsg("Problem setting Autoboot");

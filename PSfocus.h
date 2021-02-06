@@ -23,7 +23,6 @@ typedef enum {     PS_NOT_MOVING,
                    PS_LOCKED
 } PS_MOTOR;
 
-int  POLLMS = 1000; 
 
 class PWRSTR : public INDI::Focuser
 
@@ -33,6 +32,8 @@ class PWRSTR : public INDI::Focuser
     PSCTL psctl;
 
     PWRSTR();
+    	
+	//int  POLLMS = 1000; 
 
         const char *getDefaultName() override;
         virtual bool initProperties() override;
