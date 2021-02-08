@@ -34,4 +34,6 @@ install:
 	\cp -f indi_powerstarfocus /usr/bin/
 	\cp -f indi_powerstarfocus.xml /usr/share/indi/
 	\cp -f pstui /usr/bin/
+	service indiwebmanager stop
+	service indiwebmanager start
 

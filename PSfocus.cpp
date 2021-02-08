@@ -89,13 +89,13 @@ bool PWRSTR::Connect()
 
         FocusAbsPosN[0].max = FocusSyncN[0].max = FocusMaxPosN[0].value;
             
-        FocusAbsPosN[0].step = FocusSyncN[0].step = FocusMaxPosN[0].value / 50.0;
+        FocusAbsPosN[0].step = FocusSyncN[0].step = 100.0;
             
         FocusAbsPosN[0].min = FocusSyncN[0].min = 0;
 
         FocusRelPosN[0].max  = FocusMaxPosN[0].value / 2;
             
-        FocusRelPosN[0].step = FocusMaxPosN[0].value / 100.0;
+        FocusRelPosN[0].step = 100.0;
             
         FocusRelPosN[0].min  = 0;
         
@@ -141,7 +141,7 @@ bool PWRSTR::Disconnect()
 //************************************************************
 const char *PWRSTR::getDefaultName()
 {
-    return "Power^Star";
+    return "Power*Star Focus";
 }
 
 //************************************************************

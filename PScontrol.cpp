@@ -377,7 +377,7 @@ PowerStarProfile PSCTL::getProfileStatus()
 
 //******************************************************************
 // Turns ports/usb on or off
-bool PSCTL::setPowerState(string &device, string &action)
+bool PSCTL::setPowerState(const string &device, const string &action)
 {
     uint8_t portCtl;
     uint8_t usbCtl;

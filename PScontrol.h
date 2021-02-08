@@ -171,7 +171,7 @@ class PSCTL
 
         bool     setDew(uint8_t channel, uint8_t percent);
         bool     setPWM(uint16_t pwmamt);
-        bool     setPowerState(string &device, string &action);
+        bool     setPowerState(const string &device, const string &action);
         bool     setAutoBoot(string &device, string &action);
         bool     setVar(uint8_t voltage);
         bool     setLED(uint8_t brightness);
@@ -193,12 +193,12 @@ class PSCTL
         void     setUserLimitStatus(float usrlimit[12]);
         
         // Set/Get Absolute Position
-        bool setAbsPosition(uint32_t ticks);
-        bool getAbsPosition(uint32_t *ticks);
+        bool    setAbsPosition(uint32_t ticks);
+        bool    getAbsPosition(uint32_t *ticks);
 
         // Set/Get Maximum Position
-        bool setMaxPosition(uint32_t ticks);
-        bool getMaxPosition(uint32_t *ticks);
+        bool    setMaxPosition(uint32_t ticks);
+        bool    getMaxPosition(uint32_t *ticks);
         
     private:
         
